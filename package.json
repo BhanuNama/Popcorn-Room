@@ -1,0 +1,28 @@
+{
+  "name": "popcorn-room",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Popcorn Room (SyncRoom) - a free watch party with studio-clean shared audio, synced YouTube, chat and a people panel.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev -w @popcorn/api\" \"npm run dev -w @popcorn/web\"",
+    "dev:api": "npm run dev -w @popcorn/api",
+    "dev:web": "npm run dev -w @popcorn/web",
+    "build": "npm run build -w @popcorn/web && npm run typecheck -w @popcorn/api",
+    "start": "npm run start -w @popcorn/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w @popcorn/shared",
+    "test:e2e": "playwright test -c tests/playwright.config.ts",
+    "livekit": "livekit-server --dev --bind 0.0.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.6",
+    "concurrently": "^10.0.7",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}

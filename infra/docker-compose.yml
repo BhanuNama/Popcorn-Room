@@ -1,0 +1,37 @@
+version: '3.9'
+
+services:
+  # Self-hosted LiveKit SFU (100% Free & Open Source)
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: popcorn-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "50000-50020:50000-50020/udp"
+    environment:
+      - LIVEKIT_KEYS=devkey: secret
+
+  # Popcorn Room Token & Room API
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.api
+    container_name: popcorn-api
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      - NODE_ENV=production
+      - PORT=8787
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - IDENTITY_SECRET=production-secret-change-me-32-chars-minimum
+      - CORS_ORIGINS=http://localhost:5173,https://popcorn.example.com
+    depends_on:
+      - livekit
