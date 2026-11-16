@@ -29,8 +29,8 @@ export const config = {
     apiSecret: req('LIVEKIT_API_SECRET', 'secret'),
   },
   /** Secret for signing identities so reconnects keep their role. */
-  identitySecret: process.env.IDENTITY_SECRET || randomBytes(32).toString('hex'),
-  mongoUri: process.env.MONGODB_URI || '',
-  giphyKey: process.env.GIPHY_API_KEY || '',
+  identitySecret: (process.env.IDENTITY_SECRET || randomBytes(32).toString('hex')).replace(/^["']|["']$/g, '').trim(),
+  mongoUri: (process.env.MONGODB_URI || '').replace(/^["']|["']$/g, '').trim(),
+  giphyKey: (process.env.GIPHY_API_KEY || '').replace(/^["']|["']$/g, '').trim(),
   tokenTtl: process.env.TOKEN_TTL || '15m',
 };
