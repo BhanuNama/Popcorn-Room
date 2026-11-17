@@ -203,6 +203,8 @@ export function LocalStage() {
     if (!v) return;
     setDuration(v.duration || 0);
     setLocalMovie({ duration: v.duration || 0 });
+    v.muted = false;
+    v.volume = streamVolume > 0 ? streamVolume : 1;
     // If sync has a position, seek to expected position
     const exp = expectedPosition(sync, clock.offsetMs);
     v.currentTime = exp;
@@ -224,9 +226,9 @@ export function LocalStage() {
   };
 
   // Seek timeline forward or backward
-  const handleSeek = (newPercent: number) => {
+  const handleSeek = (targetSec: number) => {
     if (!duration) return;
-    const target = Math.max(0, Math.min(duration, (newPercent / 100) * duration));
+    const target = Math.max(0, Math.min(duration, targetSec));
     setCurrentTime(target);
     if (videoRef.current) {
       videoRef.current.currentTime = target;
@@ -253,6 +255,10 @@ export function LocalStage() {
   // Play / Pause toggle with latest time guarantee
   const togglePlay = () => {
     const v = videoRef.current;
+    if (v) {
+      v.muted = false;
+      v.volume = streamVolume > 0 ? streamVolume : 1;
+    }
     const cur = v ? v.currentTime : currentTime;
     if (needsAudioInteraction) {
       unmuteVideo();
@@ -513,7 +519,7 @@ export function LocalStage() {
           </video>
 
           {/* Autoplay unmuted banner */}
-          {needsAudioInteraction && (
+          {(needsAudioInteraction || localMuted || streamVolume === 0) && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -522,7 +528,7 @@ export function LocalStage() {
               className="absolute top-6 z-30 flex items-center gap-2 rounded-full bg-coral-500 hover:bg-coral-600 px-5 py-2.5 text-xs font-bold text-white shadow-2xl backdrop-blur animate-bounce transition active:scale-95 cursor-pointer"
             >
               <Volume2 className="h-4 w-4" />
-              Click to Unmute Audio
+              Sound is Muted — Click to Enable Sound
             </button>
           )}
 
@@ -579,15 +585,10 @@ export function LocalStage() {
                   </span>
                   <div className="flex-1">
                     <Slider
-                      value={[duration ? (currentTime / duration) * 100 : 0]}
-                      max={100}
-                      step={0.1}
-                      onPointerDown={() => setIsScrubbing(true)}
-                      onPointerUp={() => setIsScrubbing(false)}
-                      onValueChange={(val) => {
-                        handleSeek(val[0]);
-                      }}
-                      className="cursor-pointer"
+                      value={duration > 0 ? currentTime / duration : 0}
+                      onChange={(pct) => handleSeek(pct * duration)}
+                      label="Seek movie timeline"
+                      tone="coral"
                     />
                   </div>
                   <span className="text-xs font-medium text-zinc-400 min-w-[45px]">
@@ -627,24 +628,41 @@ export function LocalStage() {
                       <RotateCw className="h-4 w-4" />
                     </button>
 
-                    {/* Volume Mute Toggle */}
-                    <button
-                      onClick={() => {
-                        if (needsAudioInteraction) {
-                          unmuteVideo();
-                        } else {
-                          setLocalMuted(!localMuted);
-                        }
-                      }}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
-                      title={localMuted ? 'Unmute' : 'Mute'}
-                    >
-                      {localMuted || streamVolume === 0 ? (
-                        <VolumeX className="h-4 w-4 text-red-400" />
-                      ) : (
-                        <Volume2 className="h-4 w-4" />
-                      )}
-                    </button>
+                    {/* Volume Mute Toggle & Inline Volume Slider */}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          if (localMuted || streamVolume === 0) {
+                            unmuteVideo();
+                          } else {
+                            setLocalMuted(true);
+                          }
+                        }}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
+                        title={localMuted || streamVolume === 0 ? 'Unmute' : 'Mute'}
+                      >
+                        {localMuted || streamVolume === 0 ? (
+                          <VolumeX className="h-4 w-4 text-red-400" />
+                        ) : (
+                          <Volume2 className="h-4 w-4" />
+                        )}
+                      </button>
+                      <div className="w-16 sm:w-20">
+                        <Slider
+                          value={localMuted ? 0 : streamVolume}
+                          onChange={(v) => {
+                            setLocalMuted(false);
+                            useRoom.getState().setAudio({ streamVolume: v });
+                            if (videoRef.current) {
+                              videoRef.current.volume = v;
+                              videoRef.current.muted = v === 0;
+                            }
+                          }}
+                          label="Movie volume"
+                          tone="coral"
+                        />
+                      </div>
+                    </div>
 
                     {/* Movie title pill */}
                     <div className="hidden sm:flex items-center gap-2 rounded-lg bg-white/5 px-3 py-1.5 border border-white/10">
