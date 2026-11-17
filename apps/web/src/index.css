@@ -109,6 +109,82 @@
   .glass-strong {
     @apply bg-[#16152a]/80 ring-1 ring-white/10 backdrop-blur-2xl;
   }
+
+  /* ------------------------------------------------------------- */
+  /*  Authentic Cinema Themes (clean, purposeful, zero gradient mud) */
+  /* ------------------------------------------------------------- */
+  [data-theme="midnight"] {
+    --theme-bg: #07090e;
+    --theme-surface: #0e131f;
+    --theme-glass: rgba(14, 19, 31, 0.85);
+    --theme-border: rgba(255, 255, 255, 0.09);
+    --theme-accent: #ff5c8a;
+  }
+
+  [data-theme="oled"] {
+    --theme-bg: #000000;
+    --theme-surface: #050505;
+    --theme-glass: rgba(8, 8, 8, 0.95);
+    --theme-border: rgba(255, 255, 255, 0.12);
+    --theme-accent: #ffffff;
+  }
+
+  [data-theme="retro"] {
+    --theme-bg: #120e0a;
+    --theme-surface: #1b140e;
+    --theme-glass: rgba(27, 20, 14, 0.88);
+    --theme-border: rgba(245, 158, 11, 0.22);
+    --theme-accent: #f59e0b;
+  }
+
+  [data-theme="cyberpunk"] {
+    --theme-bg: #05060f;
+    --theme-surface: #0a0d1e;
+    --theme-glass: rgba(10, 13, 30, 0.85);
+    --theme-border: rgba(34, 211, 238, 0.28);
+    --theme-accent: #22d3ee;
+  }
+
+  [data-theme="nordic"] {
+    --theme-bg: #070e0b;
+    --theme-surface: #0c1712;
+    --theme-glass: rgba(12, 23, 18, 0.88);
+    --theme-border: rgba(52, 211, 153, 0.22);
+    --theme-accent: #34d399;
+  }
+
+  [data-theme="sunset"] {
+    --theme-bg: #0d0714;
+    --theme-surface: #170d23;
+    --theme-glass: rgba(23, 13, 35, 0.88);
+    --theme-border: rgba(251, 113, 133, 0.24);
+    --theme-accent: #fb7185;
+  }
+
+  /* Subtitle Cues Styling */
+  video::cue {
+    background-color: rgba(0, 0, 0, 0.85);
+    color: #ffffff;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 4px 10px;
+    line-height: 1.4;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+  }
+
+  .subtitles-sm video::cue {
+    font-size: 15px;
+  }
+  .subtitles-md video::cue {
+    font-size: 20px;
+  }
+  .subtitles-lg video::cue {
+    font-size: 26px;
+  }
+  .subtitles-xl video::cue {
+    font-size: 34px;
+  }
   .scroll-thin {
     scrollbar-width: thin;
     scrollbar-color: rgb(255 255 255 / 0.15) transparent;

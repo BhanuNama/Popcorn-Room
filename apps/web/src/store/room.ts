@@ -10,6 +10,7 @@ import {
   type ReactionMark,
   type Role,
   type RoomSettings,
+  type RoomTheme,
   type StageMode,
   type SyncState,
 } from '@popcorn/shared';
@@ -68,6 +69,22 @@ export interface ChatToastItem {
   at: number;
 }
 
+export interface LocalMovieState {
+  file: File | null;
+  url: string | null;
+  fileName: string | null;
+  fileSize: number | null;
+  duration: number | null;
+  subtitles: {
+    name: string;
+    url: string;
+    rawVtt: string;
+    offsetSec: number;
+    fontSize: 'sm' | 'md' | 'lg' | 'xl';
+    enabled: boolean;
+  } | null;
+}
+
 export type PanelTab = 'chat' | 'people' | 'queue';
 
 interface AudioPrefs {
@@ -117,6 +134,8 @@ export interface RoomState {
     fullscreen: boolean;
     pinned: string | null;
     cameraLayout: 'side' | 'bottom' | 'hidden';
+    theme: RoomTheme;
+    ambilight: boolean;
     sheetOpen: boolean;
     youtubeDialog: boolean;
     settingsDialog: boolean;
@@ -128,11 +147,13 @@ export interface RoomState {
   /** Current smart-duck multiplier for the stream (1 = no ducking). */
   duck: number;
   consent: { kind: 'mic' | 'camera' | 'screen'; resolve: (ok: boolean) => void } | null;
+  localMovie: LocalMovieState;
 
   set: (p: Partial<RoomState>) => void;
   setUi: (p: Partial<RoomState['ui']>) => void;
   setAudio: (p: Partial<AudioPrefs>) => void;
   setLocal: (p: Partial<RoomState['local']>) => void;
+  setLocalMovie: (p: Partial<LocalMovieState>) => void;
   setWarnings: (p: Partial<RoomState['warnings']>) => void;
   reset: () => void;
 }
@@ -178,6 +199,8 @@ const initial = () => ({
     fullscreen: false,
     pinned: null,
     cameraLayout: loadPref<'side' | 'bottom' | 'hidden'>('cameraLayout', 'side'),
+    theme: loadPref<RoomTheme>('theme', 'midnight'),
+    ambilight: loadPref<boolean>('ambilight', true),
     sheetOpen: false,
     youtubeDialog: false,
     settingsDialog: false,
@@ -188,6 +211,14 @@ const initial = () => ({
   knocks: [],
   duck: 1,
   consent: null,
+  localMovie: {
+    file: null,
+    url: null,
+    fileName: null,
+    fileSize: null,
+    duration: null,
+    subtitles: null,
+  },
 });
 
 export const useRoom = create<RoomState>((set) => ({
@@ -197,6 +228,8 @@ export const useRoom = create<RoomState>((set) => ({
   setUi: (p) =>
     set((s) => {
       if (p.cameraLayout) savePref('cameraLayout', p.cameraLayout);
+      if (p.theme) savePref('theme', p.theme);
+      if (p.ambilight !== undefined) savePref('ambilight', p.ambilight);
       const ui = { ...s.ui, ...p };
       const chatOpen = (ui.panelOpen || ui.sheetOpen) && ui.tab === 'chat';
       const unread = chatOpen ? 0 : s.unread;
@@ -205,6 +238,8 @@ export const useRoom = create<RoomState>((set) => ({
     }),
   dismissChatToast: (id) =>
     set((s) => ({ chatToasts: s.chatToasts.filter((t) => t.id !== id) })),
+  setLocalMovie: (p) =>
+    set((s) => ({ localMovie: { ...s.localMovie, ...p } })),
   setAudio: (p) =>
     set((s) => {
       for (const [k, v] of Object.entries(p)) savePref(k, v);

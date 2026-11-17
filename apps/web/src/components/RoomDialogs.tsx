@@ -9,8 +9,10 @@ import {
   Users,
   Monitor,
   Flame,
+  Palette,
 } from 'lucide-react';
 import { YoutubeIcon } from './YoutubeIcon';
+import { ROOM_THEMES } from './ThemeSelector';
 import { toast } from 'sonner';
 import { parseYouTubeId, parseYouTubeStart, ytThumb, formatTime } from '@popcorn/shared';
 import { api } from '@/lib/api';
@@ -169,6 +171,8 @@ function SettingsDialog({
   const me = useRoom((s) => s.me);
   const settings = useRoom((s) => s.settings);
   const cameraLayout = useRoom((s) => s.ui.cameraLayout);
+  const theme = useRoom((s) => s.ui.theme);
+  const ambilight = useRoom((s) => s.ui.ambilight);
 
   const isHost = me?.role === 'host';
 
@@ -301,6 +305,57 @@ function SettingsDialog({
                 Hidden
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* Room Theme & Dynamic Ambilight */}
+        <div className="space-y-3 rounded-2xl bg-white/5 p-4 ring-1 ring-white/10">
+          <span className="text-xs font-bold uppercase tracking-wider text-popcorn-primary flex items-center gap-1.5">
+            <Palette className="h-3.5 w-3.5" /> Room Theme & Vibes
+          </span>
+
+          <div className="grid grid-cols-2 gap-2">
+            {ROOM_THEMES.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => {
+                  if (isHost) controller.setTheme(t.id);
+                  else useRoom.getState().setUi({ theme: t.id });
+                }}
+                className={cn(
+                  'flex items-center gap-2 rounded-xl border p-2 text-left transition',
+                  theme === t.id
+                    ? 'border-popcorn-primary bg-popcorn-primary/10 text-white'
+                    : 'border-white/5 bg-white/[0.02] text-zinc-400 hover:bg-white/5 hover:text-white',
+                )}
+              >
+                <div className="flex -space-x-1">
+                  {t.colors.map((c, i) => (
+                    <div
+                      key={i}
+                      className="h-3 w-3 rounded-full border border-white/20"
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+                <div className="truncate text-xs font-semibold">{t.name}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between border-t border-white/5 pt-3">
+            <div>
+              <div className="text-xs font-semibold text-white">Dynamic Wall Ambilight</div>
+              <div className="text-[10px] text-white/40">
+                Samples video frame edges and casts real-time cinema glow
+              </div>
+            </div>
+            <Switch
+              checked={ambilight && theme !== 'oled'}
+              onChange={(v) => useRoom.getState().setUi({ ambilight: v })}
+              disabled={theme === 'oled'}
+              label="Dynamic Ambilight"
+            />
           </div>
         </div>
       </div>

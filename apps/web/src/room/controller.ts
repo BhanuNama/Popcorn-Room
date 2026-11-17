@@ -33,6 +33,7 @@ import {
   type QueueItem,
   type ReactionMark,
   type RoomSettings,
+  type RoomTheme,
   type StageMode,
   type SyncState,
 } from '@popcorn/shared';
@@ -478,6 +479,18 @@ class RoomController {
           useRoom.setState({ queue: st.queue.filter((q) => q.id !== m.id) });
         break;
       }
+      case 'theme':
+        if (this.senderCanControl(p)) {
+          useRoom.getState().setUi({ theme: m.theme });
+        }
+        break;
+      case 'local-meta':
+        useRoom.getState().setLocalMovie({
+          fileName: m.fileName,
+          fileSize: m.fileSize ?? null,
+          duration: m.duration ?? null,
+        });
+        break;
     }
   }
 
@@ -660,7 +673,13 @@ class RoomController {
   private livePosition() {
     const s = useRoom.getState();
     const yt = this.yt?.getTime();
-    return typeof yt === 'number' && isFinite(yt) && s.sync.videoId ? yt : expectedPosition(s.sync, clock.offsetMs);
+    if (typeof yt === 'number' && isFinite(yt) && s.mode === 'youtube' && s.sync.videoId) {
+      return yt;
+    }
+    if (s.mode === 'local' && s.playhead.videoId === s.sync.videoId && typeof s.playhead.time === 'number' && isFinite(s.playhead.time)) {
+      return s.playhead.time;
+    }
+    return expectedPosition(s.sync, clock.offsetMs);
   }
 
   setMode(mode: StageMode) {
@@ -677,6 +696,27 @@ class RoomController {
     // Small lead time so every player has the video loaded when it starts.
     this.commitSync({ videoId, status: 'playing', position: start, rate: 1, serverTime: clock.now() + 1200 });
     return true;
+  }
+
+  loadLocalMovie(fileName: string, fileSize?: number, duration?: number) {
+    if (!canControl(useRoom.getState())) {
+      toast('Only hosts can change the video');
+      return false;
+    }
+    this.setMode('local');
+    this.setLocalMovieMeta(fileName, fileSize, duration);
+    this.commitSync({ videoId: fileName, status: 'paused', position: 0, rate: 1, serverTime: clock.now() });
+    return true;
+  }
+
+  setTheme(theme: RoomTheme) {
+    useRoom.getState().setUi({ theme });
+    void this.send({ t: 'theme', theme });
+  }
+
+  setLocalMovieMeta(fileName: string, fileSize?: number, duration?: number) {
+    useRoom.getState().setLocalMovie({ fileName, fileSize, duration });
+    void this.send({ t: 'local-meta', fileName, fileSize, duration });
   }
 
   play() {
@@ -702,7 +742,7 @@ class RoomController {
   startCountdown() {
     const s = useRoom.getState();
     const at = clock.now() + 3600;
-    if (s.mode === 'youtube' && s.sync.videoId) {
+    if ((s.mode === 'youtube' || s.mode === 'local') && s.sync.videoId) {
       this.commitSync({ status: 'playing', position: this.livePosition(), serverTime: at });
     } else {
       useRoom.setState({ countdownAt: at });

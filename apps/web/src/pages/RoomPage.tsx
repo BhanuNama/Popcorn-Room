@@ -21,6 +21,7 @@ import { useRoom } from '@/store/room';
 import { TopBar } from '@/components/TopBar';
 import { ScreenStage } from '@/components/ScreenStage';
 import { YouTubeStage } from '@/components/YouTubeStage';
+import { LocalStage } from '@/components/LocalStage';
 import { CameraStrip } from '@/components/CameraStrip';
 import { RightPanel } from '@/components/RightPanel';
 import { ControlBar } from '@/components/ControlBar';
@@ -46,8 +47,14 @@ export default function RoomPage() {
   const theatre = useRoom((s) => s.ui.theatre);
   const fullscreen = useRoom((s) => s.ui.fullscreen);
   const cameraLayout = useRoom((s) => s.ui.cameraLayout);
+  const theme = useRoom((s) => s.ui.theme);
   const people = useRoom((s) => s.people);
   const needsAudioUnlock = useRoom((s) => s.warnings.needsAudioUnlock);
+
+  // Sync theme with document root
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
   const [roomInfo, setRoomInfo] = useState<PublicRoomInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,6 +206,7 @@ export default function RoomPage() {
       <div
         id="room-stage-root"
         ref={roomContainerRef}
+        data-theme={theme}
         className={cn(
           'relative flex h-full w-full flex-col bg-stage text-white overflow-hidden select-none',
           isImmersive && 'bg-black',
@@ -252,9 +260,15 @@ export default function RoomPage() {
               isImmersive ? 'rounded-none p-0 bg-black' : 'rounded-2xl sm:rounded-3xl glass p-1.5 gap-1.5',
             )}
           >
-            {/* The Video Stage: YouTube or Screen Share (100% UNTOUCHED, ZERO OVERLAP) */}
+            {/* The Video Stage: YouTube, Local Movie File, or Screen Share (100% UNTOUCHED, ZERO OVERLAP) */}
             <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden rounded-xl sm:rounded-2xl bg-black flex items-center justify-center">
-              {mode === 'youtube' ? <YouTubeStage /> : <ScreenStage />}
+              {mode === 'youtube' ? (
+                <YouTubeStage />
+              ) : mode === 'local' ? (
+                <LocalStage />
+              ) : (
+                <ScreenStage />
+              )}
               <ReactionsOverlay />
 
               {/* Show Members button when hidden */}

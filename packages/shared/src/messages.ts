@@ -1,7 +1,9 @@
 import type { SyncState } from './sync';
 
 /** What the centre stage shows. */
-export type StageMode = 'idle' | 'screen' | 'youtube';
+export type StageMode = 'idle' | 'screen' | 'youtube' | 'local';
+
+export type RoomTheme = 'midnight' | 'oled' | 'retro' | 'cyberpunk' | 'nordic' | 'sunset';
 
 export interface QueueItem {
   id: string;
@@ -78,6 +80,8 @@ export type DataMessage =
   /** Server-time at which a 3-2-1 countdown ends (screen mode; YouTube uses a future sync state). */
   | { t: 'countdown'; at: number }
   | { t: 'waiting'; names: string[] }
+  | { t: 'theme'; theme: RoomTheme }
+  | { t: 'local-meta'; fileName: string; fileSize?: number; duration?: number }
   | { t: 'settings'; settings: RoomSettings }
   | { t: 'host-mute' };
 

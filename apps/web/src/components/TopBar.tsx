@@ -8,11 +8,13 @@ import {
   Wifi,
   MonitorUp,
   MonitorOff,
+  Film,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Logo } from './Logo';
 import { YoutubeIcon } from './YoutubeIcon';
 import { MixerPopover } from './MixerPopover';
+import { ThemeSelector } from './ThemeSelector';
 import { controller } from '@/room/controller';
 import { useRoom } from '@/store/room';
 import { Tip } from './ui';
@@ -97,6 +99,22 @@ export function TopBar() {
           </button>
         </Tip>
 
+        {/* Local Video File Sync Mode */}
+        <Tip label="Drop Local Video File (4K native Blu-ray quality, zero bandwidth)">
+          <button
+            onClick={() => controller.setMode('local')}
+            className={cn(
+              'flex h-9 items-center gap-1.5 rounded-xl px-2.5 sm:px-3 text-xs font-semibold transition',
+              mode === 'local'
+                ? 'bg-popcorn-primary/25 text-popcorn-primary ring-1 ring-popcorn-primary/40 hover:bg-popcorn-primary/35'
+                : 'bg-white/10 text-white/90 hover:bg-white/15 hover:text-white',
+            )}
+          >
+            <Film size={15} className={mode === 'local' ? 'text-popcorn-primary' : ''} />
+            <span className="hidden md:inline">Local Movie</span>
+          </button>
+        </Tip>
+
         {/* Sound Mixer */}
         <MixerPopover />
       </div>
@@ -166,6 +184,9 @@ export function TopBar() {
           <Share2 size={14} />
           <span className="hidden sm:inline">Invite</span>
         </button>
+
+        {/* Cinema Themes & Dynamic Wall Ambilight */}
+        <ThemeSelector />
 
         {/* Settings Dialog (Host & Room prefs) */}
         <Tip label="Room Settings">
