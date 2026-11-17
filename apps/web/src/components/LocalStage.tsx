@@ -27,6 +27,7 @@ import { toggleRoomFullscreen } from '@/lib/fullscreen';
 import { AmbientGlow } from './AmbientGlow';
 import { createSubtitleTrack, shiftVtt } from '@/lib/subtitles';
 import { toast } from 'sonner';
+import { isTypingTarget } from '@/lib/utils';
 
 export function LocalStage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -51,16 +52,33 @@ export function LocalStage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [needsAudioInteraction, setNeedsAudioInteraction] = useState(false);
   const [subMenuOpen, setSubMenuOpen] = useState(false);
   const [countdownNum, setCountdownNum] = useState<number | null>(null);
 
-  // Sync volume with user's stream volume slider and smart ducking
+  // Sync volume & muted property with user's stream volume slider and smart ducking
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     const effectiveDuck = smartDuck ? (duck < 0.95 ? 0.7 : 1) : 1;
-    v.volume = localMuted ? 0 : Math.max(0, Math.min(1, streamVolume * effectiveDuck));
+    const targetVol = localMuted ? 0 : Math.max(0, Math.min(1, streamVolume * effectiveDuck));
+    v.volume = targetVol;
+    v.muted = localMuted || targetVol === 0;
   }, [streamVolume, duck, smartDuck, localMuted]);
+
+  // Unmute audio handler
+  const unmuteVideo = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = false;
+    v.volume = streamVolume > 0 ? streamVolume : 1;
+    setLocalMuted(false);
+    setNeedsAudioInteraction(false);
+    if (v.paused && sync.status === 'playing') {
+      v.play().catch(() => {});
+    }
+  }, [streamVolume, sync.status]);
 
   // Handle local video file selection
   const handleFile = useCallback(
@@ -193,7 +211,9 @@ export function LocalStage() {
   const onTimeUpdate = () => {
     const v = videoRef.current;
     if (!v) return;
-    setCurrentTime(v.currentTime);
+    if (!isScrubbing) {
+      setCurrentTime(v.currentTime);
+    }
     useRoom.setState({
       playhead: {
         time: v.currentTime,
@@ -203,12 +223,88 @@ export function LocalStage() {
     });
   };
 
-  // Sync loop: executes every 1.5s to correct drift and respond to sync commands
+  // Seek timeline forward or backward
+  const handleSeek = (newPercent: number) => {
+    if (!duration) return;
+    const target = Math.max(0, Math.min(duration, (newPercent / 100) * duration));
+    setCurrentTime(target);
+    if (videoRef.current) {
+      videoRef.current.currentTime = target;
+    }
+    if (isController) {
+      controller.seek(target);
+    }
+  };
+
+  // Jump by delta seconds (+/- 10s)
+  const skip = (deltaSec: number) => {
+    const v = videoRef.current;
+    const cur = v ? v.currentTime : currentTime;
+    const target = Math.max(0, Math.min(duration, cur + deltaSec));
+    setCurrentTime(target);
+    if (v) {
+      v.currentTime = target;
+    }
+    if (isController) {
+      controller.seek(target);
+    }
+  };
+
+  // Play / Pause toggle with latest time guarantee
+  const togglePlay = () => {
+    const v = videoRef.current;
+    const cur = v ? v.currentTime : currentTime;
+    if (needsAudioInteraction) {
+      unmuteVideo();
+    }
+    if (isController) {
+      if (sync.status === 'playing') {
+        controller.pause(cur);
+      } else {
+        controller.play(cur);
+      }
+    } else if (v) {
+      if (v.paused) {
+        v.play().catch((err) => {
+          if (err.name === 'NotAllowedError') {
+            v.muted = true;
+            v.play().then(() => setNeedsAudioInteraction(true)).catch(() => {});
+          }
+        });
+      } else {
+        v.pause();
+      }
+    }
+  };
+
+  // Keyboard shortcuts (Space = Play/Pause, ArrowLeft = -10s, ArrowRight = +10s, M = Mute)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        skip(-10);
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        skip(10);
+      } else if (e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        setLocalMuted((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [togglePlay, skip]);
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !localMovie.url) return;
 
     const tick = () => {
+      if (isScrubbing) return;
+
       const vTime = v.currentTime;
       const vRate = v.playbackRate;
       const until = msUntilStart(sync, clock.offsetMs);
@@ -217,7 +313,7 @@ export function LocalStage() {
       if (until > 0) {
         setCountdownNum(Math.ceil(until / 1000));
         if (!v.paused) v.pause();
-        if (Math.abs(vTime - sync.position) > 0.4) {
+        if (Math.abs(vTime - sync.position) > 0.5) {
           v.currentTime = sync.position;
         }
         return;
@@ -227,7 +323,7 @@ export function LocalStage() {
 
       if (sync.status === 'paused') {
         if (!v.paused) v.pause();
-        if (Math.abs(vTime - sync.position) > 0.4) {
+        if (Math.abs(vTime - sync.position) > 0.5) {
           v.currentTime = sync.position;
         }
         return;
@@ -235,8 +331,11 @@ export function LocalStage() {
 
       if (sync.status === 'playing') {
         if (v.paused) {
-          v.play().catch(() => {
-            // Autoplay might require interaction
+          v.play().catch((err) => {
+            if (err.name === 'NotAllowedError') {
+              v.muted = true;
+              v.play().then(() => setNeedsAudioInteraction(true)).catch(() => {});
+            }
           });
         }
 
@@ -257,7 +356,7 @@ export function LocalStage() {
     return () => {
       if (driftTimerRef.current) clearInterval(driftTimerRef.current);
     };
-  }, [sync, localMovie.url]);
+  }, [sync, localMovie.url, isScrubbing]);
 
   // Auto-hide controls when mouse is inactive
   const handleMouseMove = () => {
@@ -383,7 +482,15 @@ export function LocalStage() {
         </div>
       ) : (
         /* Case 2: Video file loaded */
-        <div className="relative flex h-full w-full items-center justify-center">
+        <div
+          className="relative flex h-full w-full items-center justify-center cursor-pointer"
+          onClick={(e) => {
+            if ((e.target as HTMLElement).tagName === 'VIDEO' || e.target === e.currentTarget) {
+              togglePlay();
+            }
+          }}
+          onDoubleClick={toggleRoomFullscreen}
+        >
           <video
             ref={videoRef}
             src={localMovie.url}
@@ -405,6 +512,20 @@ export function LocalStage() {
             )}
           </video>
 
+          {/* Autoplay unmuted banner */}
+          {needsAudioInteraction && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                unmuteVideo();
+              }}
+              className="absolute top-6 z-30 flex items-center gap-2 rounded-full bg-coral-500 hover:bg-coral-600 px-5 py-2.5 text-xs font-bold text-white shadow-2xl backdrop-blur animate-bounce transition active:scale-95 cursor-pointer"
+            >
+              <Volume2 className="h-4 w-4" />
+              Click to Unmute Audio
+            </button>
+          )}
+
           {/* 3-2-1 Countdown Overlay */}
           <AnimatePresence>
             {countdownNum !== null && (
@@ -415,8 +536,8 @@ export function LocalStage() {
                 transition={{ duration: 0.3 }}
                 className="pointer-events-none absolute z-30 flex flex-col items-center justify-center"
               >
-                <div className="flex h-32 w-32 items-center justify-center rounded-full border-4 border-popcorn-primary bg-black/80 shadow-2xl backdrop-blur">
-                  <span className="text-6xl font-black text-popcorn-primary">
+                <div className="flex h-32 w-32 items-center justify-center rounded-full border-4 border-coral-500 bg-black/80 shadow-2xl backdrop-blur">
+                  <span className="text-6xl font-black text-coral-400">
                     {countdownNum}
                   </span>
                 </div>
@@ -461,14 +582,10 @@ export function LocalStage() {
                       value={[duration ? (currentTime / duration) * 100 : 0]}
                       max={100}
                       step={0.1}
+                      onPointerDown={() => setIsScrubbing(true)}
+                      onPointerUp={() => setIsScrubbing(false)}
                       onValueChange={(val) => {
-                        if (!duration) return;
-                        const target = (val[0] / 100) * duration;
-                        if (isController) {
-                          controller.seek(target);
-                        } else if (videoRef.current) {
-                          videoRef.current.currentTime = target;
-                        }
+                        handleSeek(val[0]);
                       }}
                       className="cursor-pointer"
                     />
@@ -483,16 +600,8 @@ export function LocalStage() {
                   <div className="flex items-center gap-3">
                     {/* Play / Pause button */}
                     <button
-                      onClick={() => {
-                        if (isController) {
-                          if (sync.status === 'playing') controller.pause();
-                          else controller.play();
-                        } else if (videoRef.current) {
-                          if (videoRef.current.paused) videoRef.current.play();
-                          else videoRef.current.pause();
-                        }
-                      }}
-                      className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white transition-all hover:bg-white/20 active:scale-95"
+                      onClick={togglePlay}
+                      className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white transition-all hover:bg-white/20 active:scale-95 cursor-pointer"
                       title={sync.status === 'playing' ? 'Pause' : 'Play'}
                     >
                       {sync.status === 'playing' ? (
@@ -504,23 +613,15 @@ export function LocalStage() {
 
                     {/* 10s Skip back / forward */}
                     <button
-                      onClick={() => {
-                        const target = Math.max(0, currentTime - 10);
-                        if (isController) controller.seek(target);
-                        else if (videoRef.current) videoRef.current.currentTime = target;
-                      }}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white"
+                      onClick={() => skip(-10)}
+                      className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
                       title="Rewind 10s"
                     >
                       <RotateCcw className="h-4 w-4" />
                     </button>
                     <button
-                      onClick={() => {
-                        const target = Math.min(duration, currentTime + 10);
-                        if (isController) controller.seek(target);
-                        else if (videoRef.current) videoRef.current.currentTime = target;
-                      }}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white"
+                      onClick={() => skip(10)}
+                      className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
                       title="Forward 10s"
                     >
                       <RotateCw className="h-4 w-4" />
@@ -528,8 +629,14 @@ export function LocalStage() {
 
                     {/* Volume Mute Toggle */}
                     <button
-                      onClick={() => setLocalMuted(!localMuted)}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white"
+                      onClick={() => {
+                        if (needsAudioInteraction) {
+                          unmuteVideo();
+                        } else {
+                          setLocalMuted(!localMuted);
+                        }
+                      }}
+                      className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
                       title={localMuted ? 'Unmute' : 'Mute'}
                     >
                       {localMuted || streamVolume === 0 ? (

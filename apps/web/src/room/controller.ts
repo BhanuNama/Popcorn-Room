@@ -717,19 +717,34 @@ class RoomController {
     void this.send({ t: 'local-meta', fileName, fileSize, duration });
   }
 
-  play() {
+  play(currentPos?: number) {
     const s = useRoom.getState();
     if (!s.sync.videoId) return;
-    this.commitSync({ status: 'playing', position: this.livePosition(), serverTime: clock.now() + 250 });
+    const pos = typeof currentPos === 'number' && isFinite(currentPos) ? currentPos : this.livePosition();
+    useRoom.setState({
+      playhead: { ...s.playhead, time: pos },
+    });
+    const leadTime = s.mode === 'local' ? 50 : 250;
+    this.commitSync({ status: 'playing', position: pos, serverTime: clock.now() + leadTime });
   }
 
-  pause() {
-    this.commitSync({ status: 'paused', position: this.livePosition(), serverTime: clock.now() });
+  pause(currentPos?: number) {
+    const s = useRoom.getState();
+    const pos = typeof currentPos === 'number' && isFinite(currentPos) ? currentPos : this.livePosition();
+    useRoom.setState({
+      playhead: { ...s.playhead, time: pos },
+    });
+    this.commitSync({ status: 'paused', position: pos, serverTime: clock.now() });
   }
 
   seek(position: number) {
     const s = useRoom.getState();
-    this.commitSync({ position: Math.max(0, position), serverTime: clock.now() + (s.sync.status === 'playing' ? 300 : 0) });
+    const pos = Math.max(0, position);
+    useRoom.setState({
+      playhead: { ...s.playhead, time: pos },
+    });
+    const leadTime = s.mode === 'youtube' && s.sync.status === 'playing' ? 300 : 0;
+    this.commitSync({ position: pos, serverTime: clock.now() + leadTime });
   }
 
   setRate(rate: number) {
