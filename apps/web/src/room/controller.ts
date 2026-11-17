@@ -699,13 +699,11 @@ class RoomController {
   }
 
   loadLocalMovie(fileName: string, fileSize?: number, duration?: number) {
-    if (!canControl(useRoom.getState())) {
-      toast('Only hosts can change the video');
-      return false;
-    }
     this.setMode('local');
     this.setLocalMovieMeta(fileName, fileSize, duration);
-    this.commitSync({ videoId: fileName, status: 'paused', position: 0, rate: 1, serverTime: clock.now() });
+    if (canControl(useRoom.getState())) {
+      this.commitSync({ videoId: fileName, status: 'paused', position: 0, rate: 1, serverTime: clock.now() });
+    }
     return true;
   }
 

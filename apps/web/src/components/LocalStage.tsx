@@ -26,6 +26,7 @@ import { Slider } from './ui';
 import { toggleRoomFullscreen } from '@/lib/fullscreen';
 import { AmbientGlow } from './AmbientGlow';
 import { createSubtitleTrack, shiftVtt } from '@/lib/subtitles';
+import { toast } from 'sonner';
 
 export function LocalStage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -64,22 +65,30 @@ export function LocalStage() {
   // Handle local video file selection
   const handleFile = useCallback(
     (file: File) => {
-      if (!file.type.startsWith('video/') && !/\.(mp4|mkv|webm|mov|avi)$/i.test(file.name)) {
+      const isVideo =
+        file.type.startsWith('video/') ||
+        /\.(mp4|m4v|mkv|webm|mov|avi|ts|flv|wmv)$/i.test(file.name);
+      if (!isVideo) {
+        toast.error('Please select a video file (.mp4, .mkv, .webm, .mov)');
         return;
       }
-      const url = URL.createObjectURL(file);
-      setLocalMovie({
-        file,
-        url,
-        fileName: file.name,
-        fileSize: file.size,
-      });
+      try {
+        const url = URL.createObjectURL(file);
+        setLocalMovie({
+          file,
+          url,
+          fileName: file.name,
+          fileSize: file.size,
+        });
 
-      if (isController) {
         controller.loadLocalMovie(file.name, file.size);
+        toast.success(`Loaded "${file.name}"`);
+      } catch (err) {
+        console.error('Failed to create object URL', err);
+        toast.error('Failed to open video file');
       }
     },
-    [isController, setLocalMovie],
+    [setLocalMovie],
   );
 
   // Handle subtitle file selection
@@ -161,7 +170,9 @@ export function LocalStage() {
     e.preventDefault();
     setIsDragging(false);
     const files = Array.from(e.dataTransfer.files);
-    const video = files.find((f) => f.type.startsWith('video/') || /\.(mp4|mkv|webm|mov|avi)$/i.test(f.name));
+    const video = files.find(
+      (f) => f.type.startsWith('video/') || /\.(mp4|m4v|mkv|webm|mov|avi|ts|flv|wmv)$/i.test(f.name),
+    );
     const sub = files.find((f) => /\.(srt|vtt)$/i.test(f.name));
 
     if (video) handleFile(video);
@@ -286,11 +297,12 @@ export function LocalStage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="video/*,.mp4,.mkv,.webm,.mov,.avi"
+        accept="video/*,.mp4,.m4v,.mkv,.webm,.mov,.avi,.ts"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleFile(f);
+          e.target.value = '';
         }}
       />
       <input
@@ -301,6 +313,7 @@ export function LocalStage() {
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) void handleSubtitleFile(f);
+          e.target.value = '';
         }}
       />
 
@@ -311,11 +324,11 @@ export function LocalStage() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-popcorn-primary/20 backdrop-blur-md border-4 border-dashed border-popcorn-primary rounded-xl"
+            className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/85 backdrop-blur-md border-4 border-dashed border-coral-500 rounded-xl"
           >
-            <Upload className="h-16 w-16 text-popcorn-primary animate-bounce mb-3" />
+            <Upload className="h-16 w-16 text-coral-400 animate-bounce mb-3" />
             <h3 className="text-2xl font-bold text-white">Drop Movie or Subtitles Here</h3>
-            <p className="text-sm text-popcorn-primary font-medium mt-1">
+            <p className="text-sm text-coral-300 font-medium mt-1">
               Supports .mp4, .mkv, .webm video & .srt, .vtt subtitles
             </p>
           </motion.div>
@@ -326,7 +339,7 @@ export function LocalStage() {
       {!localMovie.url ? (
         <div className="z-10 flex max-w-lg flex-col items-center justify-center p-8 text-center">
           <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/5 border border-white/10 shadow-2xl mb-6 backdrop-blur">
-            <Film className="h-10 w-10 text-popcorn-primary" />
+            <Film className="h-10 w-10 text-coral-400" />
           </div>
 
           <h2 className="text-2xl font-bold tracking-tight text-white mb-2">
@@ -338,8 +351,8 @@ export function LocalStage() {
 
           {/* If the host already announced a movie */}
           {sync.videoId && (
-            <div className="mb-6 w-full rounded-xl border border-popcorn-primary/30 bg-popcorn-primary/10 p-4 text-left">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-popcorn-primary mb-1">
+            <div className="mb-6 w-full rounded-xl border border-coral-500/30 bg-coral-500/10 p-4 text-left">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-coral-400 mb-1">
                 <Sparkles className="h-4 w-4" /> Room Movie Selected
               </div>
               <div className="truncate text-sm font-semibold text-white">
@@ -354,14 +367,14 @@ export function LocalStage() {
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 rounded-xl bg-popcorn-primary px-5 py-3 text-sm font-semibold text-black transition-all hover:bg-popcorn-primary/90 shadow-lg hover:shadow-popcorn-primary/20 active:scale-95"
+              className="flex items-center gap-2 rounded-xl bg-coral-500 hover:bg-coral-600 text-white font-bold px-6 py-3.5 shadow-lg shadow-coral-500/25 transition-all active:scale-95 text-sm cursor-pointer"
             >
               <Upload className="h-4 w-4" />
-              Choose Movie File
+              Choose Movie File (.mp4, .mkv, .webm)
             </button>
             <button
               onClick={() => subInputRef.current?.click()}
-              className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-zinc-300 transition-all hover:bg-white/10 active:scale-95"
+              className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/10 hover:bg-white/15 text-white font-medium px-5 py-3.5 transition-all active:scale-95 text-sm cursor-pointer"
             >
               <SubtitlesIcon className="h-4 w-4" />
               Add Subtitle (.srt / .vtt)

@@ -10,6 +10,8 @@ import {
   Minimize,
   Sparkles,
   WifiOff,
+  Film,
+  Upload,
 } from 'lucide-react';
 import { YoutubeIcon } from './YoutubeIcon';
 import { controller } from '@/room/controller';
@@ -103,9 +105,33 @@ export function ScreenStage() {
     void toggleRoomFullscreen();
   };
 
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files);
+    const video = files.find(
+      (f) => f.type.startsWith('video/') || /\.(mp4|m4v|mkv|webm|mov|avi|ts|flv|wmv)$/i.test(f.name),
+    );
+    if (video) {
+      const url = URL.createObjectURL(video);
+      useRoom.getState().setLocalMovie({
+        file: video,
+        url,
+        fileName: video.name,
+        fileSize: video.size,
+      });
+      controller.loadLocalMovie(video.name, video.size);
+    }
+  };
+
   return (
     <div
       ref={containerRef}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
       className="group relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-black"
     >
       {/* Ambient Glow behind video */}
@@ -230,6 +256,14 @@ export function ScreenStage() {
               className="gap-2"
             >
               <YoutubeIcon size={16} className="text-red-400" /> YouTube Mode
+            </Button>
+            <Button
+              variant="glass"
+              size="md"
+              onClick={() => controller.setMode('local')}
+              className="gap-2"
+            >
+              <Film size={16} className="text-coral-400" /> Play Local Movie (4K Drop)
             </Button>
           </div>
         </div>

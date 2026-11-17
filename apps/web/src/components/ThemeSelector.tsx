@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Palette, Sparkles, Check, Radio, SunMedium, Tv } from 'lucide-react';
+import { toast } from 'sonner';
 import { type RoomTheme } from '@popcorn/shared';
 import { controller } from '@/room/controller';
 import { canControl, useRoom } from '@/store/room';
@@ -78,12 +79,13 @@ export function ThemeSelector() {
     return () => window.removeEventListener('mousedown', onClick);
   }, [open]);
 
-  const selectTheme = (theme: RoomTheme) => {
+  const selectTheme = (themeOpt: ThemeOption) => {
     if (isController) {
-      controller.setTheme(theme);
+      controller.setTheme(themeOpt.id);
     } else {
-      useRoom.getState().setUi({ theme });
+      useRoom.getState().setUi({ theme: themeOpt.id });
     }
+    toast.success(`Theme: ${themeOpt.name}`);
   };
 
   const toggleAmbilight = (enabled: boolean) => {
@@ -134,7 +136,7 @@ export function ThemeSelector() {
                 return (
                   <button
                     key={theme.id}
-                    onClick={() => selectTheme(theme.id)}
+                    onClick={() => selectTheme(theme)}
                     className={cn(
                       'group flex w-full items-center justify-between rounded-xl p-2.5 text-left transition-all border',
                       active

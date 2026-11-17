@@ -12,6 +12,8 @@ import {
   Home,
   Minimize2,
   Users,
+  Upload,
+  Film,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, ApiError } from '@/lib/api';
@@ -33,6 +35,7 @@ import { Button, Input, softSpring } from '@/components/ui';
 import { Logo } from '@/components/Logo';
 import { cn, isTypingTarget } from '@/lib/utils';
 import { initFullscreenListener, toggleRoomFullscreen } from '@/lib/fullscreen';
+import { createSubtitleTrack } from '@/lib/subtitles';
 import type { PublicRoomInfo } from '@popcorn/shared';
 
 export default function RoomPage() {
@@ -51,10 +54,76 @@ export default function RoomPage() {
   const people = useRoom((s) => s.people);
   const needsAudioUnlock = useRoom((s) => s.warnings.needsAudioUnlock);
 
-  // Sync theme with document root
+  // Sync theme with document and body elements
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    document.body.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Global drag-and-drop for local movie & subtitle files
+  const [globalDragging, setGlobalDragging] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const onGlobalDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current++;
+    if (e.dataTransfer.types.includes('Files')) {
+      setGlobalDragging(true);
+    }
+  };
+
+  const onGlobalDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current--;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setGlobalDragging(false);
+    }
+  };
+
+  const onGlobalDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const onGlobalDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    dragCounterRef.current = 0;
+    setGlobalDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    const video = files.find(
+      (f) => f.type.startsWith('video/') || /\.(mp4|m4v|mkv|webm|mov|avi|ts|flv|wmv)$/i.test(f.name),
+    );
+    const sub = files.find((f) => /\.(srt|vtt)$/i.test(f.name));
+
+    if (video) {
+      const url = URL.createObjectURL(video);
+      useRoom.getState().setLocalMovie({
+        file: video,
+        url,
+        fileName: video.name,
+        fileSize: video.size,
+      });
+      controller.loadLocalMovie(video.name, video.size);
+      toast.success(`Playing "${video.name}" in 4K Sync`);
+    }
+
+    if (sub) {
+      void createSubtitleTrack(sub, 0).then(({ url, rawVtt, name }) => {
+        useRoom.getState().setLocalMovie({
+          subtitles: {
+            name,
+            url,
+            rawVtt,
+            offsetSec: 0,
+            fontSize: 'md',
+            enabled: true,
+          },
+        });
+        toast.success(`Subtitles "${name}" attached`);
+      });
+    }
+  };
 
   const [roomInfo, setRoomInfo] = useState<PublicRoomInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -207,11 +276,34 @@ export default function RoomPage() {
         id="room-stage-root"
         ref={roomContainerRef}
         data-theme={theme}
+        onDragEnter={onGlobalDragEnter}
+        onDragLeave={onGlobalDragLeave}
+        onDragOver={onGlobalDragOver}
+        onDrop={onGlobalDrop}
         className={cn(
           'relative flex h-full w-full flex-col bg-stage text-white overflow-hidden select-none',
           isImmersive && 'bg-black',
         )}
       >
+        {/* Global Movie File Drag-and-Drop Overlay */}
+        <AnimatePresence>
+          {globalDragging && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md border-4 border-dashed border-coral-500 m-4 rounded-3xl shadow-2xl"
+            >
+              <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-coral-500/20 text-coral-400 mb-4 animate-bounce">
+                <Upload size={48} />
+              </div>
+              <h2 className="text-3xl font-extrabold text-white">Drop Movie File (.mp4, .mkv, .webm)</h2>
+              <p className="mt-2 text-sm text-coral-300 font-medium">
+                Release anywhere to start synchronized 4K native playback
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
         {/* Audio Unlock Prompt (autoplay policy) */}
         <AnimatePresence>
           {needsAudioUnlock && (
