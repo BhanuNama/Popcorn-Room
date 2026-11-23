@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Track } from 'livekit-client';
 import {
   Play,
   Pause,
@@ -63,6 +64,80 @@ export function LocalStage() {
   const [needsAudioInteraction, setNeedsAudioInteraction] = useState(false);
   const [subMenuOpen, setSubMenuOpen] = useState(false);
   const [countdownNum, setCountdownNum] = useState<number | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [remoteVideoEl, setRemoteVideoEl] = useState<HTMLVideoElement | null>(null);
+  const setRemoteVideoNode = useCallback((el: HTMLVideoElement | null) => {
+    remoteVideoRef.current = el;
+    setRemoteVideoEl((prev) => (prev === el ? prev : el));
+  }, []);
+  const [hasRemoteStream, setHasRemoteStream] = useState(false);
+  const [remoteSharerName, setRemoteSharerName] = useState('');
+  const [preferLocalFile, setPreferLocalFile] = useState(false);
+
+  // If guest has not picked a local file, automatically watch the host's live local-movie stream track
+  useEffect(() => {
+    const room = controller.room;
+    if (!room || localMovie.url) {
+      setHasRemoteStream(false);
+      return;
+    }
+
+    let attachedTrack: Track | null = null;
+    const videoEl = remoteVideoRef.current;
+
+    const attachRemote = () => {
+      for (const p of room.remoteParticipants.values()) {
+        const pub = p.getTrackPublication(Track.Source.ScreenShare);
+        if (pub?.track && videoEl) {
+          if (attachedTrack !== pub.track) {
+            if (attachedTrack) attachedTrack.detach(videoEl);
+            attachedTrack = pub.track;
+            pub.track.attach(videoEl);
+            void videoEl.play().catch(() => {});
+          }
+          setRemoteSharerName(p.name || 'Host');
+          setHasRemoteStream(true);
+          return;
+        }
+      }
+      if (attachedTrack && videoEl) {
+        attachedTrack.detach(videoEl);
+        attachedTrack = null;
+      }
+      setRemoteSharerName('');
+      setHasRemoteStream(false);
+    };
+
+    attachRemote();
+    const onSub = (track: Track) => {
+      if (track.source === Track.Source.ScreenShare) attachRemote();
+    };
+    const onUnsub = (track: Track) => {
+      if (track === attachedTrack || track.source === Track.Source.ScreenShare) attachRemote();
+    };
+
+    room.on('trackSubscribed', onSub);
+    room.on('trackUnsubscribed', onUnsub);
+    room.on('trackPublished', attachRemote);
+    room.on('trackUnpublished', attachRemote);
+
+    return () => {
+      room.off('trackSubscribed', onSub);
+      room.off('trackUnsubscribed', onUnsub);
+      room.off('trackPublished', attachRemote);
+      room.off('trackUnpublished', attachRemote);
+      if (attachedTrack && videoEl) {
+        attachedTrack.detach(videoEl);
+      }
+    };
+  }, [localMovie.url, remoteVideoEl]);
+
+  // Stop captured stream when leaving local player cleanly
+  useEffect(() => {
+    return () => {
+      void controller.stopLocalMovieStream();
+    };
+  }, []);
 
   // Sync volume & muted property with user's stream volume slider and smart ducking
   useEffect(() => {
@@ -106,6 +181,7 @@ export function LocalStage() {
           fileSize: file.size,
         });
 
+        controller.stopLocalMovieStream();
         controller.loadLocalMovie(file.name, file.size);
         toast.success(`Loaded "${file.name}"`);
       } catch (err) {
@@ -422,8 +498,8 @@ export function LocalStage() {
     >
       {/* Dynamic 4-zone edge Ambilight Bias Lighting */}
       <AmbientGlow
-        videoEl={videoElState}
-        active={Boolean(localMovie.url && ambilight)}
+        videoEl={localMovie.url ? videoElState : remoteVideoEl}
+        active={Boolean((localMovie.url || hasRemoteStream) && ambilight)}
       />
 
       {/* Hidden inputs */}
@@ -468,56 +544,110 @@ export function LocalStage() {
         )}
       </AnimatePresence>
 
-      {/* Case 1: No local file loaded yet */}
+      {/* Case 1: No local file loaded yet -> Auto-play Host's live movie stream if available, or show Drop UI */}
       {!localMovie.url ? (
-        <div className="relative z-10 flex max-w-lg flex-col items-center justify-center p-6 sm:p-8 text-center">
-          <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
-            <div className="animate-orbit-slow h-72 w-72 rounded-full border border-white/[0.06]" />
-            <div className="animate-orbit-rev absolute h-48 w-48 rounded-full border border-dashed border-coral-400/20" />
-          </div>
+        <div className="relative flex h-full w-full items-center justify-center">
+          {/* Remote live stream <video> (kept mounted so adaptiveStream attaches instantaneously) */}
+          <video
+            ref={setRemoteVideoNode}
+            playsInline
+            autoPlay
+            muted // Audio plays cleanly through LiveKit ScreenShareAudio element scaled by Mixer
+            onClick={() => void controller.unlockAudio()}
+            onDoubleClick={() => void toggleRoomFullscreen()}
+            className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${
+              !hasRemoteStream || preferLocalFile ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
+            }`}
+          />
 
-          <div className="animate-float-gentle relative flex h-20 w-20 items-center justify-center rounded-3xl bg-white/[0.07] border border-white/15 shadow-2xl mb-6 backdrop-blur-xl">
-            <Film className="h-9 w-9 text-coral-300" />
-          </div>
-
-          <h2 className="font-display text-2xl font-bold tracking-tight text-white mb-2">
-            4K Local Movie Drop
-          </h2>
-          <p className="text-xs sm:text-sm text-zinc-400 mb-6 leading-relaxed">
-            Watch any local film together in <strong className="text-white">100% native quality</strong> with zero compression. Everyone drops their file and stays locked in sync.
-          </p>
-
-          {/* If the host already announced a movie */}
-          {sync.videoId && (
-            <div className="mb-6 w-full rounded-2xl border border-coral-500/30 bg-coral-500/10 p-4 text-left backdrop-blur">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-coral-300 mb-1">
-                <Sparkles className="h-4 w-4" /> Room Movie Selected
+          {/* Live stream HUD overlays for Guests */}
+          {hasRemoteStream && !preferLocalFile && (
+            <>
+              <div className="absolute top-3.5 left-3.5 z-20 flex items-center gap-2 rounded-full bg-ink-950/80 px-3 py-1.5 text-xs font-medium text-white ring-1 ring-white/15 backdrop-blur-md">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="truncate max-w-[180px] sm:max-w-xs">
+                  {sync.videoId ? `${sync.videoId} · via ${remoteSharerName}` : `Live from ${remoteSharerName}`}
+                </span>
               </div>
-              <div className="truncate text-sm font-semibold text-white">
-                {sync.videoId}
+
+              <div className="absolute top-3.5 right-3.5 z-20 flex items-center gap-2">
+                <button
+                  onClick={() => setPreferLocalFile(true)}
+                  className="butter-btn hidden sm:flex items-center gap-1.5 rounded-full bg-ink-950/80 px-3 py-1.5 text-[11px] font-semibold text-white/85 ring-1 ring-white/15 backdrop-blur-md hover:bg-ink-900"
+                  title="Have this exact file locally? Load it for zero-compression 4K sync"
+                >
+                  <Upload size={12} /> Use Local 4K Copy
+                </button>
+                <button
+                  onClick={() => void toggleRoomFullscreen()}
+                  className="butter-btn grid h-8 w-8 place-items-center rounded-full bg-ink-950/80 text-white ring-1 ring-white/15 backdrop-blur-md hover:bg-ink-900"
+                  title="Fullscreen"
+                >
+                  {fullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
+                </button>
               </div>
-              <p className="text-xs text-zinc-300 mt-1">
-                Drop or choose your copy of this file to sync up with the room!
-              </p>
-            </div>
+            </>
           )}
 
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="butter-btn flex items-center gap-2 rounded-xl bg-coral-500 hover:bg-coral-600 text-white font-semibold px-6 py-3.5 shadow-lg shadow-coral-500/25 text-sm cursor-pointer"
-            >
-              <Upload className="h-4 w-4" />
-              Choose Movie File (.mp4, .mkv, .webm)
-            </button>
-            <button
-              onClick={() => subInputRef.current?.click()}
-              className="butter-btn flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.08] hover:bg-white/[0.14] text-white font-medium px-5 py-3.5 text-sm cursor-pointer"
-            >
-              <SubtitlesIcon className="h-4 w-4" />
-              Add Subtitle (.srt / .vtt)
-            </button>
-          </div>
+          {(!hasRemoteStream || preferLocalFile) && (
+            <div className="relative z-10 flex max-w-lg flex-col items-center justify-center p-6 sm:p-8 text-center">
+              <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
+                <div className="animate-orbit-slow h-72 w-72 rounded-full border border-white/[0.06]" />
+                <div className="animate-orbit-rev absolute h-48 w-48 rounded-full border border-dashed border-coral-400/20" />
+              </div>
+
+              <div className="animate-float-gentle relative flex h-20 w-20 items-center justify-center rounded-3xl bg-white/[0.07] border border-white/15 shadow-2xl mb-6 backdrop-blur-xl">
+                <Film className="h-9 w-9 text-coral-300" />
+              </div>
+
+              <h2 className="font-display text-2xl font-bold tracking-tight text-white mb-2">
+                4K Local Movie Drop
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-400 mb-6 leading-relaxed">
+                Watch any film together. Friends automatically receive the host&apos;s live stream, or everyone can load the same file for <strong className="text-white">100% uncompressed 4K sync</strong>.
+              </p>
+
+              {/* If the host already announced a movie */}
+              {sync.videoId && (
+                <div className="mb-6 w-full rounded-2xl border border-coral-500/30 bg-coral-500/10 p-4 text-left backdrop-blur">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-coral-300 mb-1">
+                    <Sparkles className="h-4 w-4" /> Room Movie Selected
+                  </div>
+                  <div className="truncate text-sm font-semibold text-white">
+                    {sync.videoId}
+                  </div>
+                  <p className="text-xs text-zinc-300 mt-1">
+                    Live stream starts automatically as soon as the host presses Play — or load your own copy below!
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="butter-btn flex items-center gap-2 rounded-xl bg-coral-500 hover:bg-coral-600 text-white font-semibold px-6 py-3.5 shadow-lg shadow-coral-500/25 text-sm cursor-pointer"
+                >
+                  <Upload className="h-4 w-4" />
+                  Choose Movie File (.mp4, .mkv, .webm)
+                </button>
+                <button
+                  onClick={() => subInputRef.current?.click()}
+                  className="butter-btn flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.08] hover:bg-white/[0.14] text-white font-medium px-5 py-3.5 text-sm cursor-pointer"
+                >
+                  <SubtitlesIcon className="h-4 w-4" />
+                  Add Subtitle (.srt / .vtt)
+                </button>
+                {hasRemoteStream && preferLocalFile && (
+                  <button
+                    onClick={() => setPreferLocalFile(false)}
+                    className="butter-btn rounded-xl border border-white/15 bg-white/[0.06] hover:bg-white/[0.12] px-4 py-3 text-xs font-semibold text-white/85"
+                  >
+                    Back to Live Host Stream
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* Case 2: Video file loaded */
@@ -534,6 +664,16 @@ export function LocalStage() {
             ref={setVideoNode}
             src={localMovie.url}
             onLoadedMetadata={onLoadedMetadata}
+            onLoadedData={() => {
+              if (videoRef.current && isController) {
+                void controller.startLocalMovieStream(videoRef.current);
+              }
+            }}
+            onPlay={() => {
+              if (videoRef.current && isController) {
+                void controller.startLocalMovieStream(videoRef.current);
+              }
+            }}
             onTimeUpdate={onTimeUpdate}
             onEnded={() => controller.onVideoEnded()}
             className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${cueClass}`}

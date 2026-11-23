@@ -393,7 +393,7 @@ export default function RoomPage() {
             {/* The Video Stage: YouTube, Local Movie File, or Screen Share */}
             <div
               className={cn(
-                'relative flex-1 min-w-0 min-h-0 overflow-hidden rounded-xl sm:rounded-2xl flex items-center justify-center ring-1 ring-white/[0.05]',
+                'relative flex-1 min-w-0 min-h-[220px] overflow-hidden rounded-xl sm:rounded-2xl flex items-center justify-center ring-1 ring-white/[0.05]',
                 (!ambilight || theme === 'oled') && 'bg-black',
               )}
             >

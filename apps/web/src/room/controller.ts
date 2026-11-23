@@ -129,6 +129,8 @@ class RoomController {
   private localAudioCtx: AudioContext | null = null;
   private localAnalyser: AnalyserNode | null = null;
   private localAnalyserBuf: Uint8Array<ArrayBuffer> | null = null;
+  private localMovieTracks: MediaStreamTrack[] = [];
+  private localMovieStreamEl: HTMLVideoElement | null = null;
 
   /* ------------------------------ lifecycle ------------------------------ */
 
@@ -198,6 +200,7 @@ class RoomController {
   async disconnect() {
     this.stopLocalAudioMonitor();
     this.stopBlackFrameDetector();
+    await this.stopLocalMovieStream();
     if (this.knockTimer) clearInterval(this.knockTimer);
     if (this.duckTimer) clearInterval(this.duckTimer);
     this.bufferTimers.forEach((t) => clearTimeout(t));
@@ -674,7 +677,12 @@ class RoomController {
 
   private applySync(state: SyncState, force: boolean) {
     const cur = useRoom.getState().sync;
-    const newer = state.version > cur.version || (state.version === cur.version && state.serverTime > cur.serverTime);
+    // Allow video switches (e.g. from local file name or after host reload) even if version counter reset
+    const videoChanged = Boolean(state.videoId && state.videoId !== cur.videoId && state.serverTime >= cur.serverTime - 3000);
+    const newer =
+      state.version > cur.version ||
+      (state.version === cur.version && state.serverTime > cur.serverTime) ||
+      videoChanged;
     if (!force && !newer) return;
     const patch: Partial<ReturnType<typeof useRoom.getState>> = { sync: state };
     if (msUntilStart(state, clock.offsetMs) > 0) patch.countdownAt = state.serverTime;
@@ -711,6 +719,9 @@ class RoomController {
   }
 
   setMode(mode: StageMode) {
+    if (mode !== 'local') {
+      void this.stopLocalMovieStream();
+    }
     useRoom.setState({ mode });
     void this.send({ t: 'mode', mode });
   }
@@ -720,9 +731,10 @@ class RoomController {
       toast('Only hosts can change the video', { description: 'You can add it to the queue instead.' });
       return false;
     }
+    void this.stopLocalMovieStream();
     this.setMode('youtube');
     // Small lead time so every player has the video loaded when it starts.
-    this.commitSync({ videoId, status: 'playing', position: start, rate: 1, serverTime: clock.now() + 1200 });
+    this.commitSync({ videoId, status: 'playing', position: start, rate: 1, serverTime: clock.now() + 900 });
     return true;
   }
 
@@ -1235,6 +1247,7 @@ class RoomController {
   async startShare() {
     const lp = this.room?.localParticipant;
     if (!lp) return;
+    await this.stopLocalMovieStream();
     if (!caps.canShareScreen) {
       toast.error('Screen sharing is not available on this device', { description: 'Use Chrome or Edge on a desktop.' });
       return;
@@ -1332,6 +1345,107 @@ class RoomController {
   async stopShare() {
     await this.room?.localParticipant.setScreenShareEnabled(false);
     this.onLocalShareEnded();
+  }
+
+  /** Capture and stream the host's local <video> element live to room guests so phones/others watch immediately without needing the file locally. */
+  async startLocalMovieStream(videoEl: HTMLVideoElement) {
+    const lp = this.room?.localParticipant;
+    if (!lp || !parseMeta(lp.metadata).presenter) return;
+    if (this.localMovieStreamEl === videoEl && this.localMovieTracks.length > 0) return;
+
+    await this.stopLocalMovieStream();
+    if (useRoom.getState().local.sharing) {
+      await this.stopShare();
+    }
+
+    const capFn =
+      (videoEl as HTMLVideoElement & { captureStream?: () => MediaStream; mozCaptureStream?: () => MediaStream })
+        .captureStream ||
+      (videoEl as HTMLVideoElement & { mozCaptureStream?: () => MediaStream }).mozCaptureStream;
+    if (typeof capFn !== 'function') return;
+
+    let stream: MediaStream;
+    try {
+      stream = capFn.call(videoEl);
+    } catch {
+      return;
+    }
+    this.localMovieStreamEl = videoEl;
+
+    const publishVideoTrack = async (track: MediaStreamTrack) => {
+      if (this.localMovieStreamEl !== videoEl || this.localMovieTracks.includes(track)) return;
+      this.localMovieTracks.push(track);
+      try {
+        await lp.publishTrack(track, {
+          name: 'local-movie-video',
+          source: Track.Source.ScreenShare,
+          stream: 'local-movie',
+          simulcast: false,
+          scalabilityMode: 'L1T2',
+          videoCodec: 'vp9',
+          backupCodecPolicy: BackupCodecPolicy.SIMULCAST,
+          backupCodec: {
+            codec: 'vp8',
+            encoding: { maxBitrate: 10_000_000, maxFramerate: 30, priority: 'high' },
+          },
+          screenShareEncoding: { maxBitrate: 10_000_000, maxFramerate: 30, priority: 'high' },
+          degradationPreference: 'maintain-resolution',
+        });
+      } catch {
+        // ignore duplicate or disconnected publish errors
+      }
+    };
+
+    const publishAudioTrack = async (track: MediaStreamTrack) => {
+      if (this.localMovieStreamEl !== videoEl || this.localMovieTracks.includes(track)) return;
+      this.localMovieTracks.push(track);
+      try {
+        await lp.publishTrack(track, {
+          name: 'local-movie-audio',
+          source: Track.Source.ScreenShareAudio,
+          stream: 'local-movie',
+          audioPreset: { maxBitrate: 256_000 },
+          forceStereo: true,
+          dtx: false,
+          red: true,
+        });
+      } catch {
+        // ignore
+      }
+    };
+
+    const vTrack = stream.getVideoTracks()[0];
+    if (vTrack) {
+      vTrack.contentHint = 'motion';
+      await publishVideoTrack(vTrack);
+    }
+    const aTrack = stream.getAudioTracks()[0];
+    if (aTrack) {
+      await publishAudioTrack(aTrack);
+    }
+
+    // Chromium often adds the audio track slightly after play() starts
+    stream.addEventListener('addtrack', (ev) => {
+      if (this.localMovieStreamEl !== videoEl) return;
+      if (ev.track.kind === 'video') {
+        ev.track.contentHint = 'motion';
+        void publishVideoTrack(ev.track);
+      } else if (ev.track.kind === 'audio') {
+        void publishAudioTrack(ev.track);
+      }
+    });
+  }
+
+  async stopLocalMovieStream() {
+    this.localMovieStreamEl = null;
+    const lp = this.room?.localParticipant;
+    const tracks = this.localMovieTracks.splice(0);
+    if (!lp || tracks.length === 0) return;
+    for (const t of tracks) {
+      try {
+        await lp.unpublishTrack(t, false);
+      } catch {}
+    }
   }
 
   private onLocalShareEnded() {
