@@ -189,7 +189,7 @@ function CameraTile({
           : isPinned
             ? 'ring-2 ring-coral-400/70'
             : 'ring-white/10 hover:ring-white/25',
-        layout === 'side' ? 'w-32 md:w-full h-22 md:h-28' : 'w-32 sm:w-40 h-22 sm:h-26',
+        layout === 'side' ? 'w-28 md:w-full h-20 md:h-28' : 'w-28 sm:w-40 h-20 sm:h-26',
       )}
     >
       {/* Subtle hue-tinted backdrop when camera is off */}
