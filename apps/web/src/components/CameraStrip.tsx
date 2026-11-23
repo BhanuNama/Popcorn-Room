@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { ParticipantEvent, Track } from 'livekit-client';
 import {
@@ -12,6 +12,7 @@ import {
   Columns,
   Rows,
   Crown,
+  FlipHorizontal2,
 } from 'lucide-react';
 import { controller } from '@/room/controller';
 import { useRoom, type PersonVM } from '@/store/room';
@@ -133,6 +134,7 @@ function CameraTile({
   layout: 'side' | 'bottom';
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [flipped, setFlipped] = useState(false);
 
   // Attach participant camera track immediately and handle first-time subscribe / unmute events cleanly
   useEffect(() => {
@@ -200,14 +202,14 @@ function CameraTile({
         />
       )}
 
-      {/* Video element when camera is ON */}
+      {/* Video element when camera is ON (matches exact orientation seen by everyone; optional Flip toggle on hover) */}
       {person.camOn ? (
         <video
           ref={videoRef}
           playsInline
           autoPlay
           muted
-          className={cn('h-full w-full object-cover', person.isLocal && '-scale-x-100')}
+          className={cn('h-full w-full object-cover', flipped && '-scale-x-100')}
         />
       ) : (
         /* Avatar fallback when camera is OFF */
@@ -247,17 +249,31 @@ function CameraTile({
         )}
       </div>
 
-      {/* Pin button */}
-      <button
-        onClick={togglePin}
-        className={cn(
-          'absolute top-1.5 right-1.5 z-10 grid h-6 w-6 place-items-center rounded-lg bg-black/60 text-white backdrop-blur transition-opacity',
-          isPinned ? 'opacity-100 text-coral-300 ring-1 ring-coral-400/40' : 'opacity-0 group-hover:opacity-100',
+      {/* Flip + Pin controls */}
+      <div className="absolute top-1.5 right-1.5 z-10 flex items-center gap-1">
+        {person.camOn && (
+          <button
+            onClick={() => setFlipped((v) => !v)}
+            className={cn(
+              'grid h-6 w-6 place-items-center rounded-lg bg-black/60 text-white backdrop-blur transition-opacity',
+              flipped ? 'opacity-100 text-coral-300 ring-1 ring-coral-400/40' : 'opacity-0 group-hover:opacity-100',
+            )}
+            title={flipped ? 'Unflip camera view' : 'Flip camera horizontally'}
+          >
+            <FlipHorizontal2 size={11} />
+          </button>
         )}
-        title={isPinned ? 'Unpin' : 'Pin to top'}
-      >
-        {isPinned ? <PinOff size={11} /> : <Pin size={11} />}
-      </button>
+        <button
+          onClick={togglePin}
+          className={cn(
+            'grid h-6 w-6 place-items-center rounded-lg bg-black/60 text-white backdrop-blur transition-opacity',
+            isPinned ? 'opacity-100 text-coral-300 ring-1 ring-coral-400/40' : 'opacity-0 group-hover:opacity-100',
+          )}
+          title={isPinned ? 'Unpin' : 'Pin to top'}
+        >
+          {isPinned ? <PinOff size={11} /> : <Pin size={11} />}
+        </button>
+      </div>
 
       {/* Bottom Name & Mic status bar */}
       <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-between gap-1.5 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-2.5 py-1.5 text-[11px] font-medium text-white">
