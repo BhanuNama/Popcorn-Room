@@ -241,14 +241,30 @@ class RoomController {
           if (useRoom.getState().local.micOn) toast('You were muted by a host');
           useRoom.getState().setLocal({ micOn: false });
         }
+        if (p.isLocal && pub.source === Track.Source.Camera) {
+          useRoom.getState().setLocal({ camOn: false });
+        }
         refresh();
       })
-      .on(RoomEvent.TrackUnmuted, refresh)
+      .on(RoomEvent.TrackUnmuted, (pub, p) => {
+        if (p.isLocal && pub.source === Track.Source.Camera) {
+          useRoom.getState().setLocal({ camOn: true });
+        }
+        refresh();
+      })
       .on(RoomEvent.TrackPublished, refresh)
       .on(RoomEvent.TrackUnpublished, refresh)
-      .on(RoomEvent.LocalTrackPublished, refresh)
+      .on(RoomEvent.LocalTrackPublished, (pub) => {
+        if (pub.source === Track.Source.Camera) {
+          useRoom.getState().setLocal({ camOn: true });
+        }
+        refresh();
+      })
       .on(RoomEvent.LocalTrackUnpublished, (pub) => {
         if (pub.source === Track.Source.ScreenShare) this.onLocalShareEnded();
+        if (pub.source === Track.Source.Camera) {
+          useRoom.getState().setLocal({ camOn: false });
+        }
         refresh();
       })
       .on(RoomEvent.ActiveSpeakersChanged, () => {
@@ -317,8 +333,10 @@ class RoomController {
         speaking: (p.isLocal ? (this.localSpeaking || p.isSpeaking) : p.isSpeaking) || (p.isLocal && useRoom.getState().local.pttHeld),
         audioLevel: p.isLocal ? this.localAudioLevel : p.audioLevel,
         micOn: !!mic && !mic.isMuted,
-        camOn: !!cam && !cam.isMuted,
-        camTrackId: cam?.track ? cam.track.sid || cam.trackSid || 'ready' : undefined,
+        camOn: !!cam && !cam.isMuted && cam.track?.mediaStreamTrack?.readyState !== 'ended',
+        camTrackId: cam?.track
+          ? cam.track.mediaStreamTrack?.id || cam.track.sid || cam.trackSid || 'ready'
+          : undefined,
         sharing: !!p.getTrackPublication(Track.Source.ScreenShare),
         quality: qualityOf(p.connectionQuality),
         hand: !!pres?.hand,
@@ -1151,18 +1169,60 @@ class RoomController {
     this.refreshPeople();
   }
 
+  private camToggling = false;
+
   async toggleCamera() {
     const lp = this.room?.localParticipant;
-    if (!lp) return;
-    const on = !useRoom.getState().local.camOn;
+    if (!lp || this.camToggling) return;
+    const pub = lp.getTrackPublication(Track.Source.Camera) as LocalTrackPublication | undefined;
+    const currentlyLive = !!pub && !pub.isMuted && pub.track?.mediaStreamTrack?.readyState !== 'ended';
+    const on = !(useRoom.getState().local.camOn || currentlyLive);
+
     if (on && !(await this.consent('camera'))) return;
+
+    this.camToggling = true;
     try {
-      await lp.setCameraEnabled(on, { resolution: VideoPresets.h360.resolution }, { simulcast: true });
-      useRoom.getState().setLocal({ camOn: on });
+      if (on) {
+        // Clear any leftover muted/ended camera publication so turning ON always opens a fresh live stream
+        if (pub?.track) {
+          try {
+            pub.track.mediaStreamTrack.stop();
+          } catch {}
+          try {
+            await lp.unpublishTrack(pub.track, true);
+          } catch {}
+        }
+        const newPub = await lp.setCameraEnabled(
+          true,
+          { resolution: VideoPresets.h360.resolution },
+          { simulcast: true },
+        );
+        if (newPub?.track?.isMuted) {
+          await newPub.track.unmute();
+        }
+        useRoom.getState().setLocal({ camOn: true });
+      } else {
+        // Stop webcam hardware cleanly & unpublish so LED turns off and next ON toggle restarts cleanly
+        if (pub?.track) {
+          try {
+            pub.track.mediaStreamTrack.stop();
+          } catch {}
+          try {
+            await lp.unpublishTrack(pub.track, true);
+          } catch {}
+        }
+        await lp.setCameraEnabled(false).catch(() => {});
+        useRoom.getState().setLocal({ camOn: false });
+      }
     } catch (e) {
+      const actualPub = lp.getTrackPublication(Track.Source.Camera);
+      const actualOn = !!actualPub && !actualPub.isMuted;
+      useRoom.getState().setLocal({ camOn: actualOn });
       toast.error('Camera unavailable', { description: (e as Error).message });
+    } finally {
+      this.camToggling = false;
+      this.refreshPeople();
     }
-    this.refreshPeople();
   }
 
   /* ------------------------------ media: screen share ------------------------------ */
