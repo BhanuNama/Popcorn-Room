@@ -1,228 +1,285 @@
-# 🪐 The Orbit (`@popcorn/*`) — Complete Technical Documentation & System Architecture
+<div align="center">
 
-> **One screen at the center. Everyone in orbit.**
->
-> **The Orbit** is a 100% free, zero-account, cinema-grade real-time watch-party platform featuring **Hybrid 4K Local Movie Drop + Live WebRTC Streaming**, **60 fps Low-Latency Screen Share**, **NTP-Synced YouTube Lockstep Playback**, **Real-Time 4-Zone Edge Ambilight**, and **Studio-Isolated Multi-Track Voice & Camera Chat** for desktop and mobile browsers.
+# 🪐 The Orbit (`@popcorn/*`)
+
+### **One screen at the center. Everyone in orbit.**
+
+A 100% free, zero-account, cinema-grade real-time watch-party platform with **Hybrid 4K Local Movie Drop + Live WebRTC Streaming**, **60 fps Low-Latency Screen Share**, **NTP-Synced YouTube Lockstep Playback**, **Real-Time 4-Zone Canvas Ambilight**, and **Studio-Isolated Multi-Track Voice & Camera Chat** across laptop and mobile browsers.
+
+[![Node](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](#13-local-development-testing--free-tier-deployment)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Monorepo-3178C6?style=flat-square&logo=typescript&logoColor=white)](#5-monorepo-workspace--complete-file-inventory)
+[![LiveKit WebRTC](https://img.shields.io/badge/WebRTC-LiveKit_SFU-6366F1?style=flat-square)](#3-system-architecture--network-topology)
+[![Zero Cost Stack](https://img.shields.io/badge/Cost-%240_Free_Tier_Native-10B981?style=flat-square)](#13-local-development-testing--free-tier-deployment)
+
+</div>
 
 ---
 
 ## Table of Contents
 
-1. [Executive Vision & Core Engineering Rule](#1-executive-vision--core-engineering-rule)
-2. [How The Orbit Differs from Every Other Watch-Party App](#2-how-the-orbit-differs-from-every-other-watch-party-app)
-3. [High-Level System Architecture & Data Topology](#3-high-level-system-architecture--data-topology)
-4. [End-to-End Room Join, Auth, Knock & Sync Sequence](#4-end-to-end-room-join-auth-knock--sync-sequence)
-5. [Monorepo Package Structure & Complete File Inventory](#5-monorepo-package-structure--complete-file-inventory)
-6. [Media & Real-Time Systems Engineering (Deep Dive)](#6-media--real-time-systems-engineering-deep-dive)
+1. [Core Agenda & Design Philosophy](#1-core-agenda--design-philosophy)
+2. [How The Orbit Differs from Other Platforms](#2-how-the-orbit-differs-from-other-platforms)
+3. [System Architecture & Network Topology](#3-system-architecture--network-topology)
+4. [Connection, Auth, Knock-to-Enter & Authority Sync Flow](#4-connection-auth-knock-to-enter--authority-sync-flow)
+5. [Monorepo Workspace & Complete File Inventory](#5-monorepo-workspace--complete-file-inventory)
+6. [Audio & Video Systems Engineering (Deep Dive)](#6-audio--video-systems-engineering-deep-dive)
    - [6.1 Dual-Track Audio Isolation, RED Prevention & Bluetooth HFP Guard](#61-dual-track-audio-isolation-red-prevention--bluetooth-hfp-guard)
    - [6.2 Unified Single-Element Hardware A/V Lip-Sync & Playout Lock](#62-unified-single-element-hardware-av-lip-sync--playout-lock)
-   - [6.3 Hybrid Local Movie Drop + Live WebRTC Movie Stream](#63-hybrid-local-movie-drop--live-webrtc-movie-stream)
+   - [6.3 Hybrid 4K Local Movie Drop & Live WebRTC Streaming](#63-hybrid-4k-local-movie-drop--live-webrtc-streaming)
    - [6.4 Low-Latency 60 fps Screen Share Pipeline & Diagnostics](#64-low-latency-60-fps-screen-share-pipeline--diagnostics)
-   - [6.5 Client-Side Subtitle Parser & Real-Time Shifter (`.srt` / `.vtt`)](#65-client-side-subtitle-parser--real-time-shifter-srt--vtt)
+   - [6.5 Client-Side Subtitle Engine (`.srt` → WebVTT + Dynamic Shifter)](#65-client-side-subtitle-engine-srt--webvtt--dynamic-shifter)
 7. [Time Synchronization & YouTube Lockstep Algorithms](#7-time-synchronization--youtube-lockstep-algorithms)
    - [7.1 NTP Minimum-RTT Clock Offset Estimation (`ServerClock`)](#71-ntp-minimum-rtt-clock-offset-estimation-serverclock)
-   - [7.2 YouTube Timeline Math, Drift Matrix & Autoplay Recovery](#72-youtube-timeline-math-drift-matrix--autoplay-recovery)
+   - [7.2 YouTube Timeline Math, Drift Decision Matrix & Autoplay Recovery](#72-youtube-timeline-math-drift-decision-matrix--autoplay-recovery)
 8. [Visual Immersion, Camera Engineering & Responsive UI](#8-visual-immersion-camera-engineering--responsive-ui)
    - [8.1 Dynamic 4-Zone Canvas Ambilight Engine (`AmbientGlow`)](#81-dynamic-4-zone-canvas-ambilight-engine-ambientglow)
-   - [8.2 Six Non-Pink Cinema Themes (`[data-theme]` Specification)](#82-six-non-pink-cinema-themes-data-theme-specification)
+   - [8.2 Six Non-Pink Cinema Themes (`[data-theme]` Palette Spec)](#82-six-non-pink-cinema-themes-data-theme-palette-spec)
    - [8.3 Camera Hardware Lifecycle, Orientation Parity & Mobile Layout](#83-camera-hardware-lifecycle-orientation-parity--mobile-layout)
-   - [8.4 Complete UI Component Flows, Chat, Queue, Recap Heatmap & Shortcuts](#84-complete-ui-component-flows-chat-queue-recap-heatmap--shortcuts)
-9. [State Management Schema (`useRoom` Zustand Store & Persistence)](#9-state-management-schema-useroom-zustand-store--persistence)
+   - [8.4 Landing Experience, Chat, Queue, Recap Heatmap & Keyboard Shortcuts](#84-landing-experience-chat-queue-recap-heatmap--keyboard-shortcuts)
+9. [State Management Architecture (`useRoom` & `localStorage`)](#9-state-management-architecture-useroom--localstorage)
 10. [Security Model, Cryptography, Roles & Rate Limiting](#10-security-model-cryptography-roles--rate-limiting)
-11. [Complete REST API & LiveKit DataChannel Protocol Schemas](#11-complete-rest-api--livekit-datachannel-protocol-schemas)
-12. [Hard-Won Engineering Lessons & Production Bugs Solved](#12-hard-won-engineering-lessons--production-bugs-solved)
-13. [Local Development, Testing & Free-Tier Production Deployment](#13-local-development-testing--free-tier-production-deployment)
+11. [Complete REST API & LiveKit DataChannel Reference](#11-complete-rest-api--livekit-datachannel-reference)
+12. [Hard-Won Engineering Fixes & Production Postmortems](#12-hard-won-engineering-fixes--production-postmortems)
+13. [Local Development, Testing & Free-Tier Deployment](#13-local-development-testing--free-tier-deployment)
 
 ---
 
-## 1. Executive Vision & Core Engineering Rule
+## 1. Core Agenda & Design Philosophy
 
-Standard video-conferencing tools optimize for human speech over noisy microphones, while consumer watch-party extensions require logins, desktop executables, or inject compression and audio ducking that ruin film scores.
+Most watch-party and conferencing tools either compress audio like a phone call, require browser extensions/paid accounts, or break down when desktop and phone users watch together.
 
-**The Orbit** is designed around two strict guarantees:
+**The Orbit** is designed from first principles around four pillars:
 
-1. **Acoustic Purity:** Movie/screen sound must ride in **unprocessed 48 kHz stereo (256 kbps Opus)** with Acoustic Echo Cancellation (AEC), Noise Suppression (NS), Automatic Gain Control (AGC), Voice Isolation, DTX, and RED redundancy strictly disabled—while friend voices travel on an **independent mono channel (40 kbps Opus)** mixed strictly locally on the receiver.
-2. **Zero-Friction Cinema Anywhere:** No account creation, no desktop client installation, and automatic cross-device adaptation from 4K desktops to portrait mobile phones via one shared URL (`/r/:roomId`).
+> [!IMPORTANT]
+> **The Unshakeable Sound Rule:** Movie and tab audio must travel as untouched **48 kHz stereo (256 kbps Opus)** with voice DSP strictly turned **OFF**, while participant voices travel on a separate channel and are mixed strictly locally on each viewer's device.
+
+1. **Zero Friction Entry:** No accounts, logins, extensions, or downloads. Create a room in one click and share `/r/:roomId`.
+2. **Three Stage Modes Under One Roof:** Seamlessly switch between **60 fps Screen Share**, **Synced YouTube**, and **4K Local Movie Drop** inside the same live session.
+3. **Desktop & Phone Parity:** Adaptive layouts automatically move camera strips and chat drawers to non-overlapping bottom surfaces on phones while preserving desktop theatre columns.
+4. **100% Free Infrastructure:** Zero paid SaaS dependencies—runs cleanly on free tiers (**Vercel** + **Render** + **LiveKit Cloud Free Tier** or self-hosted **Oracle Cloud Docker** + optional **MongoDB Atlas M0** & **GIPHY**).
 
 ---
 
 ## 2. How The Orbit Differs from Every Other Watch-Party App
 
-| Dimension | Teleparty / Browser Extensions | Discord / Meet Screen Share | Hyperbeam / Virtual Browsers | **The Orbit** |
+| Feature / Engineering Layer | Teleparty / Extensions | Discord / Meet Screen Share | Virtual Browser Services | **The Orbit** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Install / Account** | Requires extension + streaming login | Requires account + desktop app for good audio | Account + paid HD / time queues | **Zero signup, zero install, pure web URL** |
-| **Audio Separation** | Relies on external voice app | Often applies voice ducking/NS/mono collapse; Bluetooth HFP breaks music | Server browser encode only | **Strict dual-track WebRTC isolation + auto non-Bluetooth mic picker + stereo restore** |
-| **Bluetooth Headset Fix** | Doesn't touch audio devices | Windows/phone switches headset to 8 kHz mono telephony when mic opens | No voice mic isolation | **Filters out `handsfree/hfp/bluetooth` mics automatically & unpublishes hardware track on mute** |
-| **Audio/Video Lip-Sync** | Plays audio & video inside external site | Separate WebRTC audio/video consumers drift under packet loss | Server VNC/VM stream | **Unified single `<video>` element attachment + `120 ms` matched `setPlayoutDelay` on both tracks** |
-| **Local Movie Files** | Not supported | Must share screen window (captures OS UI, extra GPU load) | Requires uploading gigabytes | **Hybrid:** Drop `.mp4`/`.mkv`/`.webm` locally (0 upload) -> auto-streams live WebRTC `H.264` to phones, OR synced local 4K copies |
-| **Custom Subtitles** | Streaming service captions only | None | None | **Client-side `.srt` → WebVTT parser + real-time `±0.5 s` offset shifter + 4 typography sizes** |
-| **Ambilight & Themes** | None | Static dark theme | Static frame | **Real-time `32×18` edge-sampling 4-zone Ambilight wall glow + 6 curated cinema themes (incl. True OLED Black)** |
-| **Cost** | Paid features / ads | Nitro paywall for 1080p60 | Paid minutes/HD tiers | **100% Free** (Vercel + Render + LiveKit Cloud Free Tier / Oracle Always Free Docker) |
+| **Account & Install** | Extension + streaming login required | Account + desktop client for system audio | Account + wait queues | **Pure web URL, instant anonymous guest entry** |
+| **Movie vs. Voice Audio** | Relies on external voice chat | Voice AEC/AGC often pumps music; Nitro needed for high quality | Encoded into single VM stream | **Independent stereo movie track (`red: false`) + mono voice track (`40 kbps`)** |
+| **Bluetooth Headset Bug** | Unhandled by website | Opening headset mic forces OS 8 kHz HFP telephony mode | Unhandled | **Auto-excludes Bluetooth HFP mics, re-asserts stereo constraints & frees hardware on mute** |
+| **A/V Lip-Sync** | Separate from voice overlay | Video & audio jitter buffers can drift apart | Single VM container | **Unified single `<video>` element + locked `120 ms` playout delay on both tracks** |
+| **Local Movie Files** | Not supported | OS window capture only | Requires uploading full file | **Hybrid:** Native `blob:` playback + live WebRTC `H.264` stream to guests/phones OR local 4K copies |
+| **Custom Subtitles** | Locked to platform captions | None | None | **Offline `.srt` → WebVTT parser + real-time `±0.5 s` offset shifter + 4 font scales** |
+| **Theater Immersion** | None | Static dark theme | Plain iframe | **Real-time `32×18` edge-sampling 4-zone Ambilight + 6 non-pink cinema themes** |
 
 ---
 
-## 3. High-Level System Architecture & Data Topology
+## 3. System Architecture & Network Topology
 
-**The Orbit** cleanly decouples **control/token signaling** (Fastify Node API) from **real-time WebRTC media & peer state** (LiveKit SFU), leaving heavy video/subtitle processing completely on the client:
+**The Orbit** splits responsibilities cleanly across three layers so the API server never touches heavy video/audio traffic and browsers handle rendering, subtitle parsing, and local mixing natively:
 
 ```mermaid
-flowchart TB
-    subgraph Clients["Browser Clients (apps/web · React 19 + Vite + Zustand)"]
-        LP["Landing Page<br/>(Orbital Showcase, Live Mixer Sim, Create Room)"]
-        RP["Room Stage Shell (RoomPage.tsx)<br/>(TopBar · ControlBar · CameraStrip · RightPanel)"]
-        STAGES["Stage Engines<br/>ScreenStage | LocalStage | YouTubeStage"]
-        AL["AmbientGlow (32x18 Canvas)<br/>& Local Client Utilities (Clock / Subtitles)"]
-        CTRL["RoomController Singleton (controller.ts)<br/>(LiveKit Room, Media Tracks, Rate Limiters)"]
-        LP --> RP --> STAGES --> AL
-        RP <--> CTRL
+flowchart LR
+    subgraph Web["Frontend SPA (apps/web · React 19 + Vite + Zustand)"]
+        Landing["Landing Page\nOrbital Showcase + Mixer Sim"]
+        Room["Room Shell (RoomPage.tsx)\nTopBar + ControlBar + Panels"]
+        Stages["Stage Engines\nScreenStage / LocalStage / YouTubeStage"]
+        Fx["AmbientGlow Canvas\nServerClock + Subtitle Shifter"]
+        Ctrl["RoomController Singleton\ncontroller.ts"]
+        Landing --> Room
+        Room --> Stages --> Fx
+        Room <--> Ctrl
     end
 
-    subgraph API["Fastify Signaling & Auth API (apps/api)"]
-        HTTP["REST Router (server.ts)<br/>Rooms · Knock · Roles · oEmbed · GIF Proxy · Time"]
-        AUTH["Crypto & Permissions (store.ts / livekit.ts)<br/>scrypt Passwords · SHA-256 hostKey · HMAC identitySig"]
-        DB["RoomStore<br/>In-Memory Map (default) or MongoDB Atlas"]
-        HTTP <--> AUTH
-        HTTP <--> DB
+    subgraph Api["Signaling & Auth Server (apps/api · Fastify)"]
+        Rest["REST API Routes\nRooms / Knock / Roles / Time / oEmbed / GIFs"]
+        Sec["Crypto & Grants\nscrypt / SHA-256 / HMAC / LiveKit JWT"]
+        Store["RoomStore\nIn-Memory Map or MongoDB Atlas"]
+        Rest <--> Sec
+        Rest <--> Store
     end
 
-    subgraph SFU["LiveKit SFU Media & Data Mesh"]
-        MEDIA["SFU Selective Forwarding<br/>ScreenShare Video (VP8/H.264)<br/>ScreenShare Audio (256kbps Stereo Opus)<br/>Camera Video (h360 Simulcast)<br/>Voice Audio (40kbps Mono Opus)"]
-        DATA["LiveKit DataChannel (Topic: 'popcorn')<br/>SyncState · Chat · Spoilers · Reactions · Queue · Snapshot"]
+    subgraph Media["LiveKit SFU Media & Data Mesh"]
+        Tracks["Selective Forwarding Media\nScreenShare Video + Stereo Audio\nCamera h360 Simulcast + Mono Voice"]
+        Data["LiveKit DataChannel\nTopic: 'popcorn'\nSync / Chat / Queue / Reactions / Snapshot"]
     end
 
-    CTRL -- "HTTPS JSON (VITE_API_URL)" --> HTTP
-    API -- "RoomServiceClient & Mint JWT (LIVEKIT_HOST)" --> SFU
-    CTRL <-- "WebRTC SRTP + DataChannel (WSS LIVEKIT_URL)" --> MEDIA
-    CTRL <-- "Reliable / Lossy PubSub" --> DATA
+    Ctrl -- "HTTPS JSON (VITE_API_URL)" --> Rest
+    Api -- "RoomServiceClient + AccessToken" --> Media
+    Ctrl <-- "WebRTC SRTP (WSS)" --> Tracks
+    Ctrl <-- "Reliable & Lossy PubSub" --> Data
 ```
+
+### Design Responsibility Split
+
+| Layer | What It Handles | What It Deliberately Avoids |
+| :--- | :--- | :--- |
+| **`apps/web`** | WebRTC track capture/playback, NTP probing, YouTube IFrame API, `.srt` parsing, `32×18` canvas Ambilight, chat grouping/spoilers | Exposing GIPHY API keys, trusting client role claims without server JWTs |
+| **`apps/api`** | Room creation, salted password verification, waiting-room knocks, signed identity HMACs, LiveKit JWT minting, oEmbed caching, GIPHY proxy | Touching any media bytes, transcoding video/audio, running heavy room timers |
+| **`LiveKit SFU`** | Forwarding encrypted DTLS/SRTP media tracks, enforcing `canPublishSources` & `canUpdateOwnMetadata: false`, relaying `DATA_TOPIC` messages | Persistent storage or server-side media recording |
 
 ---
 
-## 4. End-to-End Room Join, Auth, Knock & Sync Sequence
+## 4. Connection, Auth, Knock-to-Enter & Authority Sync Flow
 
-Every room join guarantees host authority integrity, waiting-room gating when enabled, clock synchronization before media drift checks run, and instant state catch-up for latecomers:
+Every session enforces server-signed role permissions, optional waiting-room admission, minimum-RTT clock alignment, and seamless state catch-up for latecomers or refreshing tabs:
 
 ```mermaid
 sequenceDiagram
     actor Host
     actor Guest
-    participant API as Fastify API (apps/api)
+    participant API as Fastify API
     participant LK as LiveKit SFU
 
-    Host->>API: POST /api/rooms { name, hostName, password?, knock?, anyoneCanPresent? }
-    API-->>Host: { room: PublicRoomInfo, hostKey } (saved in localStorage)
-    Host->>API: POST /api/rooms/:id/join { name, hostKey }
-    API-->>Host: { status: 'ok', token (host JWT), identity, identitySig }
-    Host->>LK: room.connect(url, token) & ServerClock.sync(8 samples /api/time)
+    Note over Host,API: 1. Room Creation & Host Authentication
+    Host->>API: POST /api/rooms (hostName, password?, knock?, anyoneCanPresent?)
+    API-->>Host: room (PublicRoomInfo) + hostKey (32-char secret)
+    Host->>API: POST /api/rooms/:id/join (name, hostKey)
+    API-->>Host: status='ok', LiveKit Host JWT, identity, identitySig
 
-    Guest->>API: GET /api/rooms/:id -> { hasPassword, knock, anyoneCanPresent }
-    Guest->>API: POST /api/rooms/:id/join { name, password? }
-    alt Knock to Enter Enabled (and new guest)
-        API-->>Guest: { status: 'knocking', requestId }
-        loop Every 3s on Host
-            Host->>API: POST /api/rooms/:id/knocks { hostKey }
-            API-->>Host: [{ requestId, name, at }]
-            Host->>API: POST /knocks/:rid/decide { approve: true }
+    Note over Guest,API: 2. Guest Join / Knock-to-Enter Workflow
+    Guest->>API: GET /api/rooms/:id
+    API-->>Guest: PublicRoomInfo (hasPassword, knock, anyoneCanPresent)
+    Guest->>API: POST /api/rooms/:id/join (name, password?)
+    alt knock == true and no valid identitySig
+        API-->>Guest: status='knocking', requestId
+        loop Poll every 3s on Host/Co-Host
+            Host->>API: POST /api/rooms/:id/knocks (hostAuth)
+            API-->>Host: Pending [{ requestId, name, at }]
+            Host->>API: POST /api/rooms/:id/knocks/:rid/decide (approve: true)
         end
-        Guest->>API: GET /api/rooms/:id/knocks/:rid -> { status: 'ok', token, identity, identitySig }
-    else Direct / Password Verified / Signed Reconnect
-        API-->>Guest: { status: 'ok', token (viewer/cohost JWT), identity, identitySig }
+        Guest->>API: GET /api/rooms/:id/knocks/:rid -> status='ok', Viewer JWT, identitySig
+    else Password Verified or Signed Reconnect
+        API-->>Guest: status='ok', LiveKit JWT, role, identitySig
     end
 
-    Guest->>LK: room.connect(url, token) + ServerClock.sync()
-    Guest->>LK: DataChannel { t: 'hello' }
-    Host->>LK: authority.isAuthority() -> { t: 'snapshot', mode, sync, queue, settings, sessionStart, reactions }
+    Note over Host,LK: 3. WebRTC Connect, Clock Sync & Room Snapshot
+    Host->>LK: room.connect(url, token) + ServerClock.sync(8 samples)
+    Guest->>LK: room.connect(url, token) + ServerClock.sync(8 samples)
+    Guest->>LK: DataChannel -> { t: 'hello' }
+    Host->>LK: isAuthority() == true -> { t: 'snapshot', mode, sync, queue, settings, reactions }
 ```
 
-### Authority Election (`controller.isAuthority()`)
-Because rooms have no persistent game-loop server holding timeline state, the connected participants deterministically elect one authority client using `roleRank`:
-$$\text{Rank Order} = \text{roleRank}[\text{host}] (2) > \text{roleRank}[\text{cohost}] (1) > \text{roleRank}[\text{viewer}] (0)$$
-Ties break by earliest `joinedAt` timestamp, then lexicographical `identity.localeCompare()`. If the host leaves temporarily, a co-host seamlessly takes over snapshot and buffer-pause duties without interrupting playback.
+### Deterministic Authority Election (`controller.isAuthority()`)
+Instead of maintaining stateful WebSocket room timers on the backend, peers elect one connected authority dynamically:
+- Rank weights: `host = 2`, `cohost = 1`, `viewer = 0`.
+- Sorted by highest `roleRank` → earliest LiveKit `joinedAt` timestamp → alphabetical `identity`.
+- That elected authority responds to `hello` with full room `snapshot` state and coordinates `autoPauseOnBuffer` if any viewer stalls.
 
 ---
 
-## 5. Monorepo Package Structure & Complete File Inventory
+## 5. Monorepo Workspace & Complete File Inventory
 
-| Workspace / File | Responsibility & Exported Core Symbols |
-| :--- | :--- |
-| **`packages/shared/src/index.ts`** | Role definitions (`Role`), `ParticipantMeta`, `PublicRoomInfo`, `CreateRoomRequest/Response`, `JoinRequest/Response`, `KnockRequestInfo`, `LIMITS` (`chatMaxLength: 500`, `chatBurst: 6`, `chatWindowMs: 10_000`, `nameMaxLength: 32`, `roomNameMaxLength: 48`), `hueFromString()`, `parseMeta()` |
-| **`packages/shared/src/messages.ts`** | `StageMode`, `RoomTheme`, `QueueItem`, `ChatReply`, `ChatGif`, `ReactionMark`, `RoomSettings` (`DEFAULT_SETTINGS`), all 18 `DataMessage` union variants, `DATA_TOPIC = 'popcorn'`, `encodeMessage()`, `decodeMessage()`, `sortQueue()` |
-| **`packages/shared/src/sync.ts`** | `SyncState`, `EMPTY_SYNC`, `DRIFT`, `expectedPosition()`, `msUntilStart()`, `decideDrift()`, `computeOffset()`, `formatTime()` |
-| **`packages/shared/src/youtube.ts`** | `parseYouTubeId()` (`youtu.be`, `watch?v=`, `/embed/`, `/shorts/`, `/live/`, `/v/`, bare 11-char ID), `parseYouTubeStart()` (`?t=`, `&start=`, `1h2m3s`), `ytThumb()` |
-| **`packages/shared/src/sync.test.ts`** | 18 Vitest unit tests validating clock offset math, drift decisions, countdown clamping, YouTube parsing, and queue sorting |
-| **`apps/api/src/config.ts`** | Strict production env check (`LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`), `CORS_ORIGINS`, `LIVEKIT_HOST` auto-upgrade (`wss->https`), `IDENTITY_SECRET`, `MONGODB_URI`, `GIPHY_API_KEY`, `TOKEN_TTL` |
-| **`apps/api/src/store.ts`** | `RoomRecord`, `MemoryStore`, `MongoStore` (`createStore()`), salted `scryptSync` (`hashPassword` / `verifyPassword`), `sha256()`, `safeEqualHex()`, HMAC-SHA256 (`signIdentity` / `verifyIdentity`), `toPublic()` |
-| **`apps/api/src/livekit.ts`** | `RoomServiceClient`, `roleFor()`, `canPresent()`, `sourcesFor()`, `mintToken()`, `applyParticipantState()`, `applyToAll()`, `muteMic()` |
-| **`apps/api/src/server.ts`** | Fastify server (`trustProxy: true`, `bodyLimit: 64 KB`, `8 MB` octet-stream parser for `/api/speedtest`), all 15 REST endpoints, 10-minute ephemeral knock map reaper, YouTube `oEmbed` in-memory cache |
-| **`apps/web/src/room/controller.ts`** | `RoomController` singleton (`controller`), `VOICE_CAPTURE`, `SCREEN_AUDIO_CAPTURE`, WebRTC lifecycle, mic/cam/screen/local-movie publishing, `AnalyserNode` voice monitor, volume & ducking engine, rate limiters, black-frame detector |
-| **`apps/web/src/store/room.ts`** | `useRoom` Zustand store, `canControl`, `roleRank`, `LocalMovieState`, `AmbientColors`, `PersonVM`, `ChatMsg`, `ChatToastItem`, `FloatingReaction`, responsive mobile `< 768px` default layout detection |
-| **`apps/web/src/lib/clock.ts`** | `ServerClock` singleton (`clock`) polling `/api/time` |
-| **`apps/web/src/lib/subtitles.ts`** | `srtToVtt()`, `shiftVtt()`, `createSubtitleTrack()` |
-| **`apps/web/src/lib/browser.ts`** | `detectBrowser()` -> `caps` (`chrome`/`edge`/`firefox`/`safari`, OS detection, `canShareScreen`, `canShareAudio`, `canShareSystemAudio`) |
-| **`apps/web/src/lib/api.ts`** | Typed fetch client reading `import.meta.env.VITE_API_URL`, `api.uploadMbps()` generating 2 MB pseudo-random payload probe |
-| **`apps/web/src/lib/session.ts`** | `session` (`popcorn:room:${id}`, `popcorn:name`), `loadPref()`, `savePref()` (`popcorn:pref:*`) |
-| **`apps/web/src/lib/fullscreen.ts`** | `toggleRoomFullscreen()` & `initFullscreenListener()` targeting `#room-stage-root` |
-| **`apps/web/src/pages/Landing.tsx`** | Orbital Landing page, interactive Theater Demo (mode & theme switching + heatmap), interactive Dual-Track Mixer simulator with `Smart Duck`, trajectory onboarding steps, and `CreateRoomDialog` |
-| **`apps/web/src/pages/RoomPage.tsx`** | Active cinema container, global drag-and-drop overlay for movies & subtitles, room-wide Ambilight wall projection, Dark Glass Pre-Join / Knock / Error / Disconnect gates, global keyboard shortcuts |
-| **`apps/web/src/components/*`** | `TopBar`, `ControlBar`, `FullscreenHud`, `RightPanel`, `CameraStrip`, `ScreenStage`, `LocalStage`, `YouTubeStage`, `AmbientGlow`, `ThemeSelector`, `MixerPopover`, `ChatTab`, `PeopleTab`, `QueueTab`, `RoomDialogs`, `ChatToastOverlay`, `ReactionsOverlay`, `Logo`, `YoutubeIcon`, `ui` |
-| **`infra/` & `tests/`** | `DEPLOYMENT.md`, `Dockerfile.api`, `docker-compose.yml`, `livekit.yaml`, `tests/playwright.config.ts`, `tests/room.spec.ts` |
+```text
+Popcorn Room/
+├── package.json                  # npm workspaces root ("apps/*", "packages/*") & scripts
+├── packages/
+│   └── shared/                   # @popcorn/shared — pure TypeScript types, crypto-free helpers & algorithms
+│       └── src/
+│           ├── index.ts          # Role, ParticipantMeta, PublicRoomInfo, LIMITS, hueFromString, parseMeta
+│           ├── messages.ts       # StageMode, RoomTheme, 18 DataMessage types, DATA_TOPIC='popcorn', sortQueue
+│           ├── sync.ts           # SyncState, DRIFT, expectedPosition, msUntilStart, decideDrift, computeOffset
+│           ├── youtube.ts        # parseYouTubeId, parseYouTubeStart, ytThumb
+│           └── sync.test.ts      # 18 Vitest unit tests
+├── apps/
+│   ├── api/                      # @popcorn/api — Fastify REST & LiveKit token/moderation backend
+│   │   ├── .env.example          # Port, CORS, LiveKit, Identity Secret, MongoDB & GIPHY templates
+│   │   └── src/
+│   │       ├── config.ts         # Production env assertions, CORS list parsing, WSS->HTTPS host derivation
+│   │       ├── livekit.ts        # AccessToken builder, permission enforcement, muteMic, applyToAll
+│   │       ├── server.ts         # 15 HTTP routes, rate limiters, 10-min knock reaper, YouTube oEmbed cache
+│   │       └── store.ts          # MemoryStore, MongoStore, scryptSync passwords, SHA-256 & HMAC helpers
+│   └── web/                      # @popcorn/web — React 19 + Vite + Tailwind CSS v4 + Motion + LiveKit Client
+│       ├── index.html            # Mobile viewport meta, theme color #090d16, Plus Jakarta Sans & Inter fonts
+│       ├── public/favicon.svg    # Vector Orbit planet & ring emblem
+│       ├── vercel.json           # SPA fallback rewrite -> /index.html
+│       └── src/
+│           ├── index.css         # Tailwind tokens, orbital keyframes, 6 [data-theme] skins, .butter-btn
+│           ├── main.tsx          # React Router & Sonner toast provider bootstrap
+│           ├── pages/
+│           │   ├── Landing.tsx   # Orbital hero showcase, live theme/mode preview, mixer simulator, CreateRoom
+│           │   └── RoomPage.tsx  # Stage container, global file drop overlay, wall Ambilight, Dark Join gate
+│           ├── room/
+│           │   └── controller.ts # RoomController singleton managing WebRTC, media tracks, mixing & data bus
+│           ├── store/
+│           │   └── room.ts       # Zustand useRoom state store + localStorage audio/UI defaults
+│           ├── lib/
+│           │   ├── api.ts        # Fetch client with VITE_API_URL & 2 MB speedtest probe
+│           │   ├── browser.ts    # Browser/OS matrix & screen-audio capability flags (caps)
+│           │   ├── clock.ts      # ServerClock NTP poller
+│           │   ├── fullscreen.ts # Cross-browser fullscreen helpers
+│           │   ├── session.ts    # Per-room secrets & user prefs in localStorage
+│           │   ├── subtitles.ts  # Offline .srt -> WEBVTT parser & cue time-shifter
+│           │   └── utils.ts      # cn(), uid(), initials(), timeOfDay(), isTypingTarget()
+│           └── components/       # UI modules: stages, strips, chat, queue, mixer, themes, dialogs, HUD
+├── infra/
+│   ├── DEPLOYMENT.md             # Free-tier deploy instructions
+│   ├── Dockerfile.api            # Production Node API Docker build
+│   ├── docker-compose.yml        # Self-hosted LiveKit SFU + Redis + API
+│   └── livekit.yaml              # Self-hosted LiveKit port & dev credentials
+└── tests/
+    ├── playwright.config.ts      # Chromium test runner with fake media devices & dual local webServers
+    └── room.spec.ts              # End-to-end tests for The Orbit Landing & 2-user Watch Party join
+```
 
 ---
 
-## 6. Media & Real-Time Systems Engineering (Deep Dive)
+## 6. Audio & Video Systems Engineering (Deep Dive)
 
 ### 6.1 Dual-Track Audio Isolation, RED Prevention & Bluetooth HFP Guard
 
-```text
-[ Sender Browser ]
-  ├── Screen / Movie Audio Track (Track.Source.ScreenShareAudio)
-  │     • capture: channelCount=2, sampleRate=48000, AEC=false, NS=false, AGC=false, goog*=false
-  │     • publish: audioPreset={maxBitrate: 256_000}, forceStereo=true, dtx=false, red=false
-  │
-  └── Microphone Voice Track (Track.Source.Microphone)
-        • filter: auto-excludes bluetooth / headset / hands-free / hfp / sco / airpods / buds
-        • capture: channelCount=1, EC/NS synced to user toggle, AGC=false, voiceIsolation=false
-        • publish: audioPreset={maxBitrate: 40_000}, forceStereo=false, dtx=false, red=true
-        • re-assert: immediately calls applyConstraints(stereo raw) on active ScreenShareAudio
-                                       │
-                                       ▼
-[ LiveKit SFU -> Receiver Browser (webAudioMix: false) ]
-  ├── Voice Elements (#audioHost) ──► Gain = muted[id] ? 0 : friendsVolume * perPerson[id]
-  └── Media Video Element         ──► Gain = min(1.0, streamVolume * duck)
-                                      (Smart Duck: 40ms step smoothing 1.0 <-> 0.7 [-3 dB])
+```mermaid
+flowchart LR
+    subgraph Sender["Sender Browser"]
+        S_Mov["Tab / Movie Audio\n48 kHz · 2 ch · Raw PCM"] -->|"AEC/NS/AGC = OFF\nred = false · dtx = false"| P_Mov["Opus 256 kbps Stereo\nTrack.Source.ScreenShareAudio"]
+        S_Mic["Non-BT Built-in Mic\n1 ch · Mono"] -->|"Bluetooth HFP Filter\nred = true · 40 kbps"| P_Mic["Opus 40 kbps Mono\nTrack.Source.Microphone"]
+    end
+
+    P_Mov --> SFU["LiveKit SFU"]
+    P_Mic --> SFU
+
+    subgraph Receiver["Receiver Browser (webAudioMix: false)"]
+        SFU --> R_Mov["Stage video Element"]
+        SFU --> R_Mic["audioHost Audio Tags"]
+        R_Mov -->|"Gain = min(1, streamVolume * duck)"| Out["Speakers / Headphones"]
+        R_Mic -->|"Gain = muted ? 0 : friendsVolume * perPerson"| Out
+    end
 ```
 
-1. **Why `red: false` on Stereo Music Was Critical:** Checking LiveKit's `LocalParticipant.mjs` source revealed that enabling RFC 2198 RED (`red: true`) alongside `forceStereo: true` wraps stereo Opus packets in redundant voice-oriented framing that breaks or cuts out sustained musical frequencies. Explicitly enforcing `red: false` on both `ScreenShareAudio` and `local-movie-audio` preserves clean 256 kbps stereo audio.
-2. **Bluetooth Hands-Free Profile (HFP) Protection:** Opening a Bluetooth headset microphone on Windows or mobile switches the OS Bluetooth audio profile from stereo A2DP (48 kHz) into bi-directional telephony HFP (8–16 kHz mono), making movies sound tinny. `controller.toggleMic()` scans enumerated inputs first, prefers built-in/array/wired microphones, removes premature `getUserMedia` probing on popover open, and on Mute/Off explicitly calls `mediaStreamTrack.stop()` + `unpublishTrack(pub.track, true)` so OS audio hardware exits recording mode and snaps back to hi-fi stereo immediately.
-3. **Zero-Output Voice Transmission Meter (`startLocalAudioMonitor`):** Creates an isolated `AudioContext` (`sinkId: { type: 'none' }` when supported) reading frequency bins (`fftSize: 128`) every `60 ms`. Speech detection activates above normalized average energy `0.012` with a 4-frame (`240 ms`) trailing hold, powering the live voice equalizer without feeding mic audio back to local speakers.
+1. **Opus `red: false` Fix for Stereo Music:** Inspecting `LocalParticipant.mjs` inside `livekit-client` confirmed that enabling RFC 2198 redundancy (`red: true`) on a `forceStereo: true` track conflicts with stereo Opus music encoding, causing distortion and cutouts. Both `ScreenShareAudio` and `local-movie-audio` explicitly override `publishDefaults` with **`red: false`**, **`dtx: false`**, and **`forceStereo: true`**.
+2. **Bluetooth Hands-Free (HFP) Auto-Protection (`controller.toggleMic` & `MixerPopover`):**
+   - `MixerPopover` intentionally avoids calling `getUserMedia({ audio: true })` on mount so opening settings never activates headset mics prematurely.
+   - When `toggleMic()` turns ON, it enumerates devices and filters out `/headset|bluetooth|buds|airpods|hands-free|handsfree|hfp|sco|ag audio|telephony/i` or `communications`, selecting internal array/wired microphones first.
+   - Immediately after opening the mic, it calls `.applyConstraints({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 2, sampleRate: 48000 })` on any active `ScreenShareAudio` track so WebRTC never applies voice DSP to the movie.
+   - Turning the mic OFF calls `mediaStreamTrack.stop()` + `lp.unpublishTrack(pub.track, true)`, instantly releasing Windows/phone Bluetooth HFP locks back to hi-fi A2DP stereo.
+3. **Zero-Output Local Speech Detector (`startLocalAudioMonitor`):** Polls a 128-bin `AnalyserNode` (created with `sinkId: { type: 'none' }` where supported) every `60 ms`, triggering `localSpeaking` above `0.012` average bin magnitude with a `4`-frame (`240 ms`) trailing release.
+4. **Smooth Smart Ducking (`controller.updateDuck`):** Off by default (`smartDuck: false`). When enabled and a remote speaker is active, smoothly steps `duck` between `1.0` and `0.7` (`-3 dB`) every `40 ms` (`0.06` fast attack / `0.03` gentle release).
 
 ---
 
 ### 6.2 Unified Single-Element Hardware A/V Lip-Sync & Playout Lock
 
-- **Problem Solved:** Previously, `controller.attachAudio()` appended `ScreenShareAudio` tracks to hidden `<audio>` tags in `#audioHost` while `<video>` played muted video. Chromium assigns separate jitter buffers to detached `<audio>` and `<video>` elements, allowing audio to lead lagging video under network fluctuations.
-- **Unified Attachment:** `controller.attachAudio()` now routes **only** `Track.Source.Microphone` to `#audioHost`. Both `LocalStage.tsx` and `ScreenStage.tsx` call `vPub.track.attach(videoEl)` and `aPub.track.attach(videoEl)` onto the **single stage `<video>` element**, letting Chrome's hardware media pipeline synchronize both tracks on one shared clock (`Track.attach` appends tracks onto `videoEl.srcObject`).
-- **Late-Audio Clock Reset (`LocalStage.tsx`):** If `ScreenShareAudio` subscribes after `ScreenShare` video has already begun playing (`audioArrivedAfterVideo`), `LocalStage` performs a clean one-time detach/re-attach of both tracks together so audio and video initialize synchronously.
-- **Jitter Buffer Cap:** On `RoomEvent.TrackSubscribed`, `controller.ts` sets `track.setPlayoutDelay(0.12)` (`120 ms`) uniformly on `ScreenShare` and `ScreenShareAudio`, and `pub.setVideoQuality(VideoQuality.HIGH)` on video so `adaptiveStream` never downgrades mobile portrait viewports to low-resolution layers.
+- **Shared `<video>` Clock:** `controller.attachAudio()` mounts **only** `Track.Source.Microphone` inside `#audioHost`. Both `ScreenStage.tsx` and `LocalStage.tsx` attach **both** `Track.Source.ScreenShare` (video) and `Track.Source.ScreenShareAudio` (audio) directly onto the same DOM `<video>` element, placing both tracks under one browser media timeline and preventing separate jitter-buffer drift.
+- **Playout Delay Matching (`TrackSubscribed`):** For both `ScreenShare` and `ScreenShareAudio`, the client calls `track.setPlayoutDelay(0.12)` (`120 ms` synchronized jitter cap) and forces `pub.setVideoQuality(VideoQuality.HIGH)` on video tracks so mobile viewports never drop to low-resolution layers via `adaptiveStream`.
 
 ---
 
-### 6.3 Hybrid Local Movie Drop + Live WebRTC Movie Stream
+### 6.3 Hybrid 4K Local Movie Drop & Live WebRTC Streaming
 
-Designed so **one user drops a file and guests/phones immediately watch and hear it**, while still preserving optional uncompressed local-file sync when two desktop peers share the same file:
+**The Orbit** solves the classic local-file watch-party trade-off ("everyone must download the file" vs. "gigabyte server uploads") using a hybrid architecture:
 
-1. **Host Pipeline (`LocalStage.tsx` + `controller.startLocalMovieStream`)**:
-   - Opens `.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`, `.ts`, `.flv`, or `.wmv` via `URL.createObjectURL(file)`.
-   - On `onPlaying` (ensuring active audio + video frames exist together), calls `videoEl.captureStream()` (uncapped native frame rate, avoiding 3:2 pull-down judder on 24 fps films; falls back to `mozCaptureStream`).
-   - Stops any manual Screen Share first (`stopShare()`), applies raw stereo audio constraints (`AEC=false, NS=false, AGC=false`), computes smart resolution scaling (`scaleDown = videoWidth > 2560 ? ... : 1` / `videoWidth > 1920 ? Math.min(2.5, videoWidth/1920) : 1` so 4K files stream crisp 1080p without choking WebRTC encoders), and publishes **both** video (`H.264`, `7.5 Mbps`, `backupCodec: false`, `maintain-resolution`, `simulcast: false`) and audio (`256 kbps` stereo Opus, `red: false`) **concurrently via `Promise.all`** under shared `stream: 'local-movie'`.
-   - Registers an `addtrack` listener on the captured `MediaStream` in case Chromium exposes the audio track milliseconds after `play()` starts.
-2. **True `1.0×` Speed Sync Algorithm (`LocalStage.tsx`)**:
-   - Playing/resuming local movies uses `leadTime = 0 ms` and `rate = 1` (`controller.play()`).
-   - `LocalStage` strictly locks `v.playbackRate = sync.rate || 1` on `loadedmetadata`, `pause`, and `play`—**never applying `1.04×`/`0.96×` rate nudging** (eliminating pitch/tempo speedup after starting or resuming from pause).
-   - Waits `1400 ms` (`playTransitionAtRef`) after starting playback for heavy 4K decoders to spin up, schedules `3-2-1` countdown starts precisely via `setTimeout`, and hard-seeks only when drift exceeds `1.5 s`.
-3. **Guest Experience**:
-   - Automatically subscribes to the host's `local-movie` stream and plays it immediately inside `LocalStage` (`Live from <host>`) with no local file required—with a one-click **Tap to Enable Movie Sound** pill if mobile autoplay policy blocks unmuted playback.
-   - Guests holding the exact same file locally can click **Use Local 4K Copy** to switch to uncompressed native playback, or toggle **Back to Live Host Stream** at any time.
+```mermaid
+flowchart TD
+    Drop["Host Drops .mp4 / .mkv / .webm File"] --> Blob["URL.createObjectURL(file)\nPlays 100% Native on Host"]
+    Blob --> Playing["onPlaying fires -> video.captureStream()\nUncapped native FPS + Stereo Audio"]
+    Playing --> Pub["Promise.all Parallel Publish (stream: 'local-movie')\nVideo: H.264 single-stream @ 7.5 Mbps (backupCodec: false)\nAudio: Opus 256 kbps stereo (red: false, AEC/NS/AGC = false)"]
+    Pub --> GuestCheck{"Does Guest have\nlocal file loaded?"}
+    GuestCheck -- "No (Phone / Instant Join)" --> LiveStream["Auto-plays Host Stream on ONE video tag\n(Ambilight + Fullscreen + Mixer Volume)"]
+    GuestCheck -- "Yes (Use Local 4K Copy)" --> LocalSync["True 1.0x Local File Sync\n0ms play lead · 1400ms startup grace · Seek if drift > 1.5s"]
+```
+
+- **Why Parallel `Promise.all` + `H.264`:** Publishing video first and audio sequentially introduced SDP round-trip drift, and dual-codec simulcast (`32 Mbps`) choked Wi-Fi. Publishing both tracks in parallel under `stream: 'local-movie'` with hardware-friendly `H.264` (`7.5 Mbps`, auto `scaleResolutionDownBy` above `1920px` for 4K files, `maintain-resolution`, `backupCodec: false`) keeps phones smooth and tightly synced.
+- **Why True `1.0×` Local File Sync Has Zero Speed-Up:** `controller.play()` commits `leadTime = 0 ms` (`serverTime: clock.now()`). `LocalStage.tsx` locks `v.playbackRate = sync.rate || 1` on `loadedmetadata`, `pause`, and `play` (never calling rate-nudge `1.04×`/`0.96×`), preventing fast/chipmunk music after start or pause/resume. Only drifts `> 1.5 s` after a `1400 ms` startup grace window trigger a hard seek.
 
 ---
 
@@ -230,23 +287,21 @@ Designed so **one user drops a file and guests/phones immediately watch and hear
 
 Implemented in `controller.startShare()` and [ScreenStage.tsx](file:///d:/Projects/Popcorn%20Room/apps/web/src/components/ScreenStage.tsx):
 
-- **Encoding Profile**: Single-stream **`videoCodec: 'vp8'`** (`backupCodec: false`, `simulcast: false`, `degradationPreference: 'balanced'`, `contentHint: 'motion'`). Defaults to **`share60 = true` (`1920×1080 @ 60 fps`, `6.0 Mbps`; `30 fps / 4.5 Mbps` toggle in Mixer)**.
-- **HiDPI Scale Guard**: Reads `mediaStreamTrack.getSettings().width`; if Windows/macOS DPI scaling captures above `1920px`, automatically applies `scaleResolutionDownBy` on `RTCRtpSender` to keep frame timing locked with audio.
-- **Built-In Presenter Diagnostics**:
-  - `api.uploadMbps()` probes `POST /api/speedtest` once on first share and triggers `slowUpload` banner if bandwidth `< 8 Mbps` (60 fps) or `< 5 Mbps` (30 fps).
-  - Checks `lp.getTrackPublication(Track.Source.ScreenShareAudio)` to warn Chrome/Edge users if **"Also share tab audio"** was forgotten (`noShareAudio`).
-  - `startBlackFrameDetector()` samples outgoing frames onto a `32×18` canvas every `2 s`; if max luminance `< 10` for 3 consecutive ticks (`blackFrame`), alerts the host about DRM protection (Netflix/Prime/Disney+).
-- **Zero-Loop Stability & GPU Toggle**: `ScreenStage` memoizes `setVideoNode` via `useCallback`, keeps `AmbientGlow` off on the presenter's own self-preview to reserve GPU cycles for screen capture, and includes a **Hide Preview (Save GPU)** / **Show Preview** toggle on the host stage.
+- **Codec & Framerate:** Single-stream **`videoCodec: 'vp8'`** (`backupCodec: false`, `simulcast: false`, `contentHint: 'motion'`, `degradationPreference: 'balanced'`), avoiding Windows hybrid-GPU `OpenH264` CPU fallback stalls and `VP9` >1 s encoder queues. Defaults to **`share60 = true` (`1920×1080 @ 60 fps`, `6.0 Mbps`; switchable to `30 fps`, `4.5 Mbps` in Mixer)**.
+- **HiDPI Scale Protection:** Checks `mst.getSettings().width`; if OS DPI scaling captures above `1920px`, applies `scaleResolutionDownBy` automatically on `RTCRtpSender`.
+- **Upload Probe (`POST /api/speedtest`):** Sends a 2 MB binary buffer on first share to warn (`slowUpload`) if upload speed is under `8 Mbps` (60 fps) or `5 Mbps` (30 fps).
+- **Audio & DRM Watchers:** Checks for missing `ScreenShareAudio` (`noShareAudio`) and runs a `32×18` canvas sampler every `2 s` (`startBlackFrameDetector`) to detect DRM black-frames (`maxLuminance < 10` for 3 ticks).
+- **Host GPU Conservation & Ref Stability:** `setVideoNode` is memoized via `useCallback` to eliminate render-driven track detach/attach blinking loops; `AmbientGlow` skips on presenter self-preview, and hosts can toggle **Hide Preview (Save GPU)** at any time.
 
 ---
 
 ### 6.5 Client-Side Subtitle Parser & Real-Time Shifter (`.srt` / `.vtt`)
 
-Implemented in [subtitles.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/lib/subtitles.ts) (100% offline/client-side, zero upload):
+Implemented completely offline in [subtitles.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/lib/subtitles.ts):
 
-- **`srtToVtt()`**: Strips `\uFEFF` UTF-8 BOM, normalizes `\r\n`/`\r` to `\n`, converts SubRip millisecond commas (`HH:MM:SS,mmm`) and shorthand (`MM:SS,mmm`) timestamps into valid `WEBVTT`.
-- **`shiftVtt(rawVtt, offsetSec)`**: Parses cue timestamps cleanly and shifts every cue start/end by `±0.5 s` increments, generating a fresh `Blob(['text/vtt'])` URL and revoking the old Blob URL so subtitle timing can be tuned live during playback.
-- **Cue Controls**: Toggle `CC` visibility + cycle `sm`, `md`, `lg`, `xl` subtitle CSS styles.
+1. **`srtToVtt()` Pipeline:** Strips UTF-8 BOM (`\uFEFF`), normalizes `\r\n`/`\r` line breaks to `\n`, converts SubRip comma timestamps (`00:01:20,500` → `00:01:20.500`), promotes shorthand timestamps (`01:20,500` → `00:01:20.500`), and prepends `WEBVTT\n\n`.
+2. **Real-Time Offset Shifting (`shiftVtt`):** Supports `±0.5 s` live sync adjustments in `LocalStage`, parsing `-->` spans, clamping `>= 0`, formatting `HH:MM:SS.mmm`, regenerating a `Blob` (`text/vtt`), and revoking the previous `ObjectURL` to prevent memory leaks.
+3. **Typography:** Supports toggleable `CC` and 4 size presets (`subtitles-sm`, `subtitles-md`, `subtitles-lg`, `subtitles-xl`).
 
 ---
 
@@ -254,14 +309,16 @@ Implemented in [subtitles.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/li
 
 ### 7.1 NTP Minimum-RTT Clock Offset Estimation (`ServerClock`)
 
-Every client runs `clock.start()` on room connect (`clock.ts` + `sync.ts`):
-- Fires `samples = 8` sequential requests (`60 ms` spacing) to uncached `GET /api/time`, recording local send time $t_0$, server timestamp $t_s$, and local receive time $t_1$ (`sync(5)` repeats every `60 s`).
-- Computes round-trip time and picks the single lowest-$RTT$ sample to reject asymmetrical network queuing spikes:
-  $$\text{RTT} = t_1 - t_0, \qquad \text{offsetMs} = t_s - \left(t_0 + \frac{\text{RTT}}{2}\right)$$
-- Normalized room clock anywhere on the client:
-  $$\text{clock.now()} = \text{Date.now()} + \text{offsetMs}$$
+Implemented in [clock.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/lib/clock.ts) and [sync.ts](file:///d:/Projects/Popcorn%20Room/packages/shared/src/sync.ts):
 
-### 7.2 YouTube Timeline Math, Drift Matrix & Autoplay Recovery
+- On connection, runs **8** HTTP probes (`60 ms` apart) against uncached `GET /api/time` (`cache-control: no-store`), re-sampling (`5` probes) every `60 s`.
+- Recording client send time $t_0$, server clock $t_s$, and client receive time $t_1$, `computeOffset()` picks the sample with the lowest round-trip time:
+
+$$\text{RTT}_i = t_{1,i} - t_{0,i}, \qquad i^* = \arg\min_i \text{RTT}_i$$
+
+$$\text{offsetMs} = t_{s,i^*} - \left(t_{0,i^*} + \frac{\text{RTT}_{i^*}}{2}\right), \qquad \text{clock.now()} = \text{Date.now()} + \text{offsetMs}$$
+
+### 7.2 YouTube Timeline Math, Drift Decision Matrix & Autoplay Recovery
 
 ```text
 expectedPosition(s, offsetMs, now) =
@@ -270,16 +327,16 @@ expectedPosition(s, offsetMs, now) =
     : s.position + max(0, (now + offsetMs - s.serverTime) / 1000) * s.rate
 ```
 
-- **Scheduled Countdowns (`msUntilStart`)**: `controller.loadVideo()` adds `+900 ms` lead time (`+3600 ms` on `startCountdown()`) to `serverTime`. While `msUntilStart > 0`, players hold paused at `sync.position` and count down `3-2-1` before starting on the same server instant.
-- **Drift Rules (`decideDrift`, unit-tested in `sync.test.ts`)**:
-  - `|drift| <= 0.8 s` (`DRIFT.ok`): Restore `1.0×` if nudged; otherwise no-op.
-  - `0.8 s < |drift| <= 2.5 s` (`DRIFT.seek`): Rate-nudge (`0.96×` if ahead, `1.04×` if behind) cleanly without jarring jumps (`YouTubeStage` hard-seeks `> 1.8 s` for snappy recovery).
-  - `|drift| > 2.5 s`: Immediate `seekTo(expected, true)`.
-- **Edge-Case Protections (`YouTubeStage.tsx` & `controller.ts`)**:
-  - `YT_ID_RE = /^[a-zA-Z0-9_-]{11}$/` prevents leftover `.mp4` filenames in `sync.videoId` from crashing `YT.Player` on mode switch; `applySync()` overrides stale `version` counters whenever `videoId` changes cleanly from an active controller.
-  - Fallback `150 ms` API readiness poller guarantees `YT.Player` initializes even if `onYouTubeIframeAPIReady` raced with mount.
-  - Autoplay recovery: if not `PLAYING`/`BUFFERING` after `850 ms`, retries muted + shows **Tap to Unmute YouTube Sound**; if strict mobile Safari/Chrome still blocks playback after another `800 ms`, mounts a centered **Tap to Watch & Unmute YouTube** gesture button.
-  - **Auto-Pause on Buffer**: If `settings.autoPauseOnBuffer` is true and any member buffers for `> 3000 ms`, the authority broadcasts pause + `waiting` member names, resuming playback automatically when all clear.
+| Measured Drift (`current - expected`) | Pure `decideDrift()` Action | `YouTubeStage.tsx` Behavior |
+| :--- | :--- | :--- |
+| **`\|drift\| <= 0.8 s`** (`DRIFT.ok`) | `'none'` (or `'restoreRate'` if `rate != 1`) | Keeps playback untouched at `1.0×` |
+| **`0.8 s < \|drift\| <= 2.5 s`** | `'rate'` (`0.96×` ahead / `1.04×` behind) | Seeks cleanly if `> 1.8 s`, holds rate `1.0×` |
+| **`\|drift\| > 2.5 s`** (`DRIFT.seek`) | `'seek'` to `expected` | Immediate `seekTo(expected, true)` |
+
+- **Scheduled Starts (`msUntilStart`):** `controller.loadVideo()` schedules `serverTime = clock.now() + 900` (`+3600` for `startCountdown()`). While `msUntilStart > 0`, players stay paused at `sync.position` and count down `3-2-1` simultaneously.
+- **Invalid ID & Version Reset Guard:** `YouTubeStage` enforces `YT_ID_RE = /^[a-zA-Z0-9_-]{11}$/` so `.mp4` names in `sync.videoId` never corrupt `YT.Player`; `applySync()` accepts controller `videoId` changes even across host reload version resets.
+- **Mobile Autoplay Recovery:** If YouTube isn't playing after `850 ms`, retries `mute() + playVideo()` + displays **Tap to Unmute YouTube Sound**; if strict mobile WebKit/Chrome still blocks playback after `800 ms`, displays a centered **Tap to Watch & Unmute YouTube** gesture button.
+- **Auto-Pause on Buffering:** When `settings.autoPauseOnBuffer` is true and any member buffers `> 3 s`, the authority broadcasts pause (`waiting: names`) until all members finish buffering.
 
 ---
 
@@ -287,132 +344,140 @@ expectedPosition(s, offsetMs, now) =
 
 ### 8.1 Dynamic 4-Zone Canvas Ambilight Engine (`AmbientGlow`)
 
-- Every `85 ms` (`~12 fps`) inside `requestAnimationFrame`, draws active `<video>` onto a `32×18` offscreen canvas (`willReadFrequently: true`) and computes 5 directional edge averages (`top`: rows 0–3, `bottom`: rows 14–17, `left`: cols 0–4, `right`: cols 27–31, `center`: inner box).
-- Applies luminance/chroma vividness expansion so dark cinema scenes emit noticeable color halos:
-  $$\text{avg} = \frac{R + G + B}{3}, \qquad c_{\text{boost}} = \text{clamp}_{[0, 255]}\!\Big(\text{round}\big((\text{avg} + (c - \text{avg}) \times 1.45) \times 1.15\big)\Big)$$
-- Projects `blur-3xl` radial gradients around the stage (`<video>` carries solid `bg-black` so light never washes out black bars or dark scenes) and updates global `ambient` state in `RoomPage` (`fixed inset-0 blur-3xl opacity-85`). Automatically disables in `oled` theme and switches to theme-matched `softFallback` gradients for cross-origin YouTube iframes.
+```mermaid
+flowchart LR
+    Vid["Active Stage Video Element"] -->|"85 ms rAF Throttle (~12 fps)"| Cvs["Offscreen 32x18 Canvas\nwillReadFrequently: true"]
+    Cvs --> Zones["5 Spatial Region Averages\nTop (rows 0-3) · Bottom (14-17)\nLeft (cols 0-4) · Right (27-31) · Center"]
+    Zones --> Boost["Vividness Amplification\nout = clamp((avg + (c - avg) * 1.45) * 1.15)"]
+    Boost --> StageHalo["Stage Radial Blur Halos\n(behind bg-black video frame)"]
+    Boost --> Wall["useRoom.ambient -> Fixed Viewport Wall Glow"]
+```
 
-### 8.2 Six Non-Pink Cinema Themes (`[data-theme]` Specification)
+- Keeps an opaque `bg-black` canvas strictly behind `<video>` elements so saturated halo gradients illuminate the theater walls and bezels **without washing out dark video pixels**.
+- Disabled automatically in `oled` mode (`theme !== 'oled'`). For cross-origin YouTube embeds (`softFallback`), casts theme-synchronized ambient gradients smoothly around the player.
 
-| Theme ID | Display Name | Primary BG (`--theme-bg`) | Accent (`--color-coral-500`) | Special Behavior |
+### 8.2 Six Non-Pink Cinema Themes (`[data-theme]` Palette Spec)
+
+| Theme ID | Display Name | Stage Background (`--theme-bg`) | Accent (`--color-coral-500`) | Design Vibe |
 | :--- | :--- | :--- | :--- | :--- |
-| `midnight` | Midnight Theater | `#070a12` | `#6366f1` (Indigo) | Balanced slate obsidian theater |
-| `oled` | True OLED Pitch Black | `#000000` | `#475569` (Slate) | Pure `#000` pixel-off black; disables Ambilight glare |
-| `retro` | Retro 80s Drive-in | `#140e08` | `#f59e0b` (Amber) | Warm vintage gold theater ambiance |
-| `cyberpunk` | Cyberpunk Azure | `#040814` | `#0ea5e9` (Sky Blue) | Crisp neon obsidian & cyan rim |
-| `nordic` | Nordic Woods | `#05110c` | `#10b981` (Emerald) | Deep forest pine & emerald calm |
-| `sunset` | Golden Hour Dusk | `#110b18` | `#f97316` (Tangerine) | Twilight dusk violet & amber warmth |
-
-*Controls (`ThemeSelector.tsx`): Controllers broadcast `{ t: 'theme', theme }` room-wide; viewers apply themes locally (`RoomDialogs.tsx` & `ThemeSelector.tsx`).*
+| `midnight` | **Midnight Theater** | `#070a12` | `#6366f1` | Deep slate charcoal & crisp indigo glow |
+| `oled` | **True OLED Pitch Black** | `#000000` | `#475569` | Pure pixel-off `#000` with Ambilight off |
+| `retro` | **Retro 80s Drive-in** | `#140e08` | `#f59e0b` | Warm amber gold vintage marquee lighting |
+| `cyberpunk` | **Cyberpunk Azure** | `#040814` | `#0ea5e9` | High-contrast dark obsidian & sky cyan |
+| `nordic` | **Nordic Woods** | `#05110c` | `#10b981` | Calm evergreen pine & emerald ambiance |
+| `sunset` | **Golden Hour Dusk** | `#110b18` | `#f97316` | Deep twilight violet & warm sunset tangerine |
 
 ### 8.3 Camera Hardware Lifecycle, Orientation Parity & Mobile Layout
 
-- **Hardware Stop & Clean Restart (`controller.toggleCamera`)**: Turning Camera OFF stops `mediaStreamTrack` hardware (turning off LEDs cleanly), calls `unpublishTrack(pub.track, true)`, and invokes `setCameraEnabled(false)` under a `camToggling` re-entrancy mutex. Turning ON clears any stale/ended publications and opens a fresh `h360` simulcast stream, indexing `camTrackId` by `mediaStreamTrack.id` so `CameraTile` attaches new tracks immediately on first toggle.
-- **Exact Left-to-Right Orientation Parity (`CameraStrip.tsx`)**: Raw laptop/mobile front webcam feeds arrive horizontally mirrored; `CameraTile` defaults `flipped = true` (`-scale-x-100`) on **both** local and remote tiles so presenters and viewers see identical orientation, with a per-tile hover **Flip (`FlipHorizontal2`)** toggle and **Pin (`Pin`)** spotlight sort (sorting pinned people first, highlighting active speakers with an emerald ring + 3-bar equalizer).
-- **Mobile-First Non-Overlapping Layout (`RoomPage.tsx`)**: Forces `flex-col md:flex-row` on the stage wrapper (`min-h-[200px]` stage minimum height), places **Show People (n)** below the video surface instead of floating over corners, defaults mobile viewports (`< 768px`) to `'bottom'` compact camera tiles (`w-28 h-20`), and houses Chat / People / Queue inside a `62dvh` backdrop-dimmed bottom sheet (`RightPanel.tsx`).
+- **Stop-and-Unpublish Lifecycle (`toggleCamera`):** Instead of LiveKit's `mute()`/`unmute()` track reuse (which fails `restartTrack()` on some laptop/phone drivers), turning the camera OFF stops the `MediaStreamTrack` hardware, calls `unpublishTrack(pub.track, true)`, and resets `camOn` under a `camToggling` lock. `camTrackId` reads `mediaStreamTrack.id` so `CameraTile` attaches new tracks instantaneously.
+- **Exact Orientation Parity:** Front-facing laptop and mobile cameras produce mirrored raw streams; `CameraTile` defaults `flipped = true` (`-scale-x-100`) on **both** local and remote tiles so presenters and viewers see identical left-to-right framing, alongside hover **Flip** (`FlipHorizontal2`) and **Pin** spotlight sorting (with Host crown pill & animated 3-bar speaking indicator).
+- **Responsive Stage Layout (`RoomPage.tsx` & `CameraStrip.tsx`):**
 
-### 8.4 Complete UI Component Flows, Chat, Queue, Recap Heatmap & Shortcuts
+```mermaid
+flowchart TD
+    Root["RoomPage Stage Wrapper"] -->|Desktop >= 768px| Desk["Side Column (md:w-52) or Bottom Shelf\n+ RightPanel Docked (344-372px)"]
+    Root -->|Mobile < 768px| Mob["Strict Vertical Stack (flex-col)\nVideo Top (min-h 200px)\nBottom Camera Shelf (w-28 h-20 tiles)\nRightPanel 62dvh Slide-Up Drawer"]
+```
 
-- **Chat (`ChatTab.tsx` & `ChatToastOverlay.tsx`)**: Consecutive messages grouped within 2 minutes; quote replies (`replyTo`); inline 24-emoji picker; full-frame 2-column masonry **GIPHY** search with 7 quick tags; **Spoiler Guard** (`vt` hides messages posted at later YouTube timestamps with 1-click Reveal); copy button; scroll-to-latest pill; and floating notification toasts when the chat drawer is collapsed.
-- **Queue & Ready Check (`QueueTab.tsx`)**: Paste any YouTube link (`parseYouTubeId` / `parseYouTubeStart`), vote items up (`sortQueue` by votes desc -> `addedAt` asc), trigger room-wide **Everyone Ready?** check (`readyCount / people.length`), and launch a `3-2-1` synchronized countdown.
-- **Session Reaction Recap (`RoomDialogs.tsx` -> `RecapDialog`)**: Aggregates up to `2,000` recorded `ReactionMark` events across **12 timeline bins** into an interactive peak-activity bar heatmap alongside emoji usage tallies (`😂 ❤️ 🔥 🍿 👏 😱`).
-- **Keyboard Shortcuts**:
-  - Global Stage: `F` Fullscreen · `T` Theatre Mode · `Esc` Exit Theatre -> Exit Fullscreen -> Collapse Drawer
-  - Local Movie Stage: `Space` Play/Pause · `←` / `→` Skip ±10 s · `M` Mute/Unmute
-  - Voice Push-to-Talk (when enabled): Hold `Space` to transmit
+### 8.4 Landing Experience, Chat, Queue, Recap Heatmap & Keyboard Shortcuts
+
+- **Landing Page (`Landing.tsx`):** Orbital ring hero lifted cleanly above the fold (`One screen at the center. Everyone in orbit.`), interactive Theater Showcase (mode + theme switcher + heatmap bars), animated **Orbit Architecture**, **6 Feature Cards**, live **Dual-Track Mixer Simulator** (interactive Movie/Voice sliders + `Smart Duck` toggle), horizontal trajectory **How it Works**, Browser Support badges, and `CreateRoomDialog`.
+- **Chat (`ChatTab.tsx` & `ChatToastOverlay.tsx`):** 2-minute message grouping, quote replies, inline 24-emoji pad, uncropped 2-column masonry GIPHY search (`Trending`, `Popcorn`, `Laugh`, `Shocked`, `Clap`, `Love`, `Dance`), YouTube timeline **Spoiler Lock** (`vt` hides messages posted ahead of viewer's playhead until revealed or reached), copy button, jump-to-latest pill, and toast notifications when chat is closed.
+- **Queue & Recap (`QueueTab.tsx` & `RecapDialog`):** Upvote-sorted YouTube queue (`votes.length` desc → `addedAt` asc), **Everyone Ready?** check, `3-2-1` countdown launch, and a **12-bin timeline reaction heatmap** summarizing peak party moments.
+- **Keyboard Shortcuts:** `F` Fullscreen · `T` Theatre Mode · `Esc` Exit Theatre / Fullscreen / Collapse Panel · `Space` Local Play/Pause or Voice Push-to-Talk · `←`/`→` Local Skip ±10 s · `M` Local Mute.
 
 ---
 
-## 9. State Management Schema (`useRoom` Zustand Store & Persistence)
+## 9. State Management Architecture (`useRoom` & `localStorage`)
 
-Central client store in [store/room.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/store/room.ts):
+All reactive room state lives in the Zustand store (`apps/web/src/store/room.ts`), cleanly separated into domain slices:
 
-- **Session & Stage State**: `connection` (`'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected'`), `disconnectReason`, `roomInfo`, `me` (`identity`, `identitySig`, `role`, `name`, `hostKey`), `mode` (`StageMode`), `sync` (`SyncState`), `queue` (`QueueItem[]`), `settings` (`RoomSettings`), `sessionStart`, `countdownAt`, `readyCheck`, `waitingFor`, `playhead`, `ytTitle`
-- **Participants & Social**: `people` (`PersonVM[]` sorted by `roleRank` then `joinedAt`), `knocks` (`KnockRequestInfo[]`), `chat` (capped at 300 entries), `unread`, `chatToasts` (max 3 stacked), `reactions` (max 2000), `floating` (max 40 animated cheers)
-- **Audio & Media**: `audio` (`streamVolume`, `friendsVolume`, `smartDuck`, `pushToTalk`, `share60`, `echoCancellation`, `micDeviceId`), `perPerson`, `localMuted`, `duck`, `local` (`micOn`, `camOn`, `sharing`, `pttHeld`, `hand`, `ready`, `micLevel`), `localMovie` (`file`, `url`, `fileName`, `fileSize`, `duration`, `subtitles`), `ambient` (`AmbientColors | null`)
-- **UI & Diagnostics**: `ui` (`panelOpen`, `tab`, `theatre`, `fullscreen`, `pinned`, `cameraLayout`, `theme`, `ambilight`, dialog flags), `warnings` (`blackFrame`, `noShareAudio`, `needsAudioUnlock`, `slowUpload`), `consent`
-- **`localStorage` Persistence (`session.ts`)**: `popcorn:room:${id}` (hostKey/identity/password), `popcorn:name` (display name), and `popcorn:pref:${name}` for persisted audio, theme, ambilight, layout, and media consent flags.
+- **Room & Sync:** `connection`, `disconnectReason`, `roomInfo`, `me` (`identity`, `identitySig`, `role`, `name`, `hostKey`), `mode`, `sync` (`EMPTY_SYNC`), `queue`, `settings`, `sessionStart`, `countdownAt`, `readyCheck`, `waitingFor`, `playhead`, `ytTitle`
+- **Participants & Social:** `people` (`PersonVM[]`), `knocks` (`KnockRequestInfo[]`), `chat` (`<= 300`), `unread`, `chatToasts` (`<= 3`), `reactions` (`<= 2000`), `floating` (`<= 40`)
+- **Audio, Local Media & Immersion:** `audio`, `perPerson`, `localMuted`, `duck`, `local` (`micOn`, `camOn`, `sharing`, `pttHeld`, `hand`, `ready`, `micLevel`), `localMovie` (handle, URL, subtitle state), `ambient`
+- **UI & Diagnostics:** `ui` (`panelOpen`, `tab`, `theatre`, `fullscreen`, `pinned`, `cameraLayout`, `theme`, `ambilight`, dialog toggles), `warnings` (`blackFrame`, `noShareAudio`, `needsAudioUnlock`, `slowUpload`), `consent`
+- **Persisted Keys (`session.ts`):** `popcorn:room:${id}` (secrets/credentials), `popcorn:name` (display name), and `popcorn:pref:${name}` (`streamVolume`, `friendsVolume`, `smartDuck`, `pushToTalk`, `share60`, `echoCancellation`, `micDeviceId`, `theme`, `ambilight`, `cameraLayout`, `consent:*`).
 
 ---
 
 ## 10. Security Model, Cryptography, Roles & Rate Limiting
 
-- **Role Matrix (`packages/shared/src/index.ts`, `apps/api/src/livekit.ts`)**:
-  - `host`: Full room settings, password/knock config, role promotion (`cohost`/`viewer`), presenter toggling, global mic mute, remove/ban, playback & theme control.
-  - `cohost`: Admit/deny knocks, mute viewer mics, remove non-host/non-cohost viewers, playback & queue control.
-  - `viewer` (`+presenter` optional): Chat, react, vote queue; screen/local streaming allowed only if promoted or `anyoneCanPresent: true` (enforced server-side via LiveKit `canPublishSources`).
-  - `openControl`: When toggled by host, allows all participants to control YouTube/Local playback & queue order.
-- **Cryptographic Guarantees (`store.ts` & `livekit.ts`)**:
-  - Room passwords salted with 16 random bytes + hashed via Node `scryptSync(pw, salt, 32)` and verified with `timingSafeEqual`.
-  - Host secret (`hostKey` 32-char nanoid) hashed with `sha256` on server (`safeEqualHex` check).
-  - Participant identity authenticated via `HMAC-SHA256(IDENTITY_SECRET, "${roomId}:${identity}")` (`verifyIdentity` regex-validated 64-hex).
-  - LiveKit JWTs explicitly lock **`canUpdateOwnMetadata: false`**.
-- **Rate Limits & Persistence**: Fastify `@fastify/rate-limit` (`240/min` global, `20/min` create room, `30/min` join, `600/min` `/api/time`, `120/min` knock poll, `10/min` `/api/speedtest`, `60/min` GIFs) + client `RateLimiter` sliding windows (`6` chats / `10 s`, `8` reactions / `2 s` send, `16` / `2 s` recv). Rooms default to `MemoryStore` and upgrade automatically to `MongoStore` (`mongodb` driver) when `MONGODB_URI` is provided (falling back cleanly on connection errors).
+| Role / Capability | Settings & Password | Knock Admit/Deny | Role / Presenter Admin | Mute Others' Mics | Remove / Ban | Playback Control | Share Screen / Local Drop |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`host`** | Yes | Yes | Yes | Yes | Yes (All except self) | Yes | Yes |
+| **`cohost`** | Read-only | Yes | No | Yes | Viewers only | Yes | Yes |
+| **`viewer`** (+ presenter) | Read-only | No | No | No | No | If `openControl` | Yes |
+| **`viewer`** (default) | Read-only | No | No | No | No | If `openControl` | If `anyoneCanPresent` |
+
+- **Cryptographic Helpers (`apps/api/src/store.ts` & `livekit.ts`):**
+  - Room passwords salted with 16-byte `randomBytes` + hashed via `scryptSync(..., 32)` and verified with `timingSafeEqual`.
+  - Host keys (32-char nanoid) verified via `sha256` + `safeEqualHex`.
+  - Reconnect identity signatures use `HMAC-SHA256(IDENTITY_SECRET, "${roomId}:${identity}")`.
+  - LiveKit JWTs explicitly set **`canUpdateOwnMetadata: false`** so clients cannot self-escalate roles or publishing permissions.
+- **Persistence & Rate Limiting:** `MemoryStore` works out of the box and auto-upgrades to `MongoStore` (`MONGODB_URI`, 5 s connection timeout with automatic in-memory fallback). Fastify throttles all endpoints (`240/min` global, endpoint-specific windows down to `10–600/min`) alongside client sliding-window burst limiters (`6` chats / `10 s`, `8` outgoing cheers / `2 s`, `16` incoming cheers / `2 s`).
 
 ---
 
-## 11. Complete REST API & LiveKit DataChannel Protocol Schemas
+## 11. Complete REST API & LiveKit DataChannel Reference
 
-### Fastify REST Endpoints (`apps/api/src/server.ts`)
+### Fastify HTTP API (`apps/api/src/server.ts`)
 
-| Method & Path | Request Payload / Query | Response Shape |
+| Endpoint | Request Payload / Params | Response / Side Effect |
 | :--- | :--- | :--- |
 | `GET /api/health` | — | `{ ok, store, livekitUrl, gifs }` |
-| `GET /api/time` | — (`cache-control: no-store`) | `{ t: number }` |
-| `POST /api/speedtest` | Raw `application/octet-stream` (`<= 8 MB`) | `{ received: number, t: number }` |
+| `GET /api/time` | — | `{ t: Date.now() }` (`cache-control: no-store`) |
+| `POST /api/speedtest` | Raw `application/octet-stream` (`<= 8 MB`) | `{ received, t }` |
 | `POST /api/rooms` | `{ hostName, name?, password?, knock?, anyoneCanPresent? }` | `{ room: PublicRoomInfo, hostKey }` |
-| `GET /api/rooms/:id` | Path param `id` | `PublicRoomInfo` (`404` if missing) |
-| `POST /api/rooms/:id/join` | `{ name, password?, hostKey?, identity?, identitySig? }` | `JoinResponse` (`status: 'ok' \| 'knocking'`) |
-| `GET /api/rooms/:id/knocks/:rid` | Path params `id`, `rid` | `{ status: 'pending' \| 'denied' } \| JoinOk` |
-| `POST /api/rooms/:id/knocks` | Host/CoHost auth body | `KnockRequestInfo[]` |
-| `POST /api/rooms/:id/knocks/:rid/decide` | Host/CoHost auth + `{ approve: boolean }` | `{ ok: true }` |
-| `PATCH /api/rooms/:id/settings` | Host auth + `{ anyoneCanPresent?, knock?, password? }` | `PublicRoomInfo` (syncs LiveKit grants via `applyToAll`) |
-| `PATCH /api/rooms/:id/participants/:identity` | Host auth + `{ role?: 'cohost' \| 'viewer', presenter?: boolean }` | `{ ok: true }` (updates LiveKit metadata & sources) |
-| `POST /api/rooms/:id/participants/:identity/mute` | Host/CoHost auth | `{ ok: true }` (server-side `mutePublishedTrack`) |
-| `POST /api/rooms/:id/participants/:identity/remove` | Host/CoHost auth + `{ ban?: boolean }` | `{ ok: true }` (removes via `roomService`, optional IP/ID ban) |
-| `GET /api/oembed?id=...` | `id` matching `/^[\w-]{11}$/` | `{ title, author }` (cached) |
-| `GET /api/gifs?q=...` | Optional search string `q` (`<= 64 chars`) | `ChatGif[]` (via GIPHY API `pg-13`, `limit=24`) |
+| `GET /api/rooms/:id` | Path `id` | `PublicRoomInfo` (`404` if unknown) |
+| `POST /api/rooms/:id/join` | `{ name, password?, hostKey?, identity?, identitySig? }` | `JoinResponse` (`{ status: 'ok', token, url, identity, identitySig, role, room }` or `{ status: 'knocking', requestId }`) |
+| `GET /api/rooms/:id/knocks/:rid` | Path `id`, `rid` | `{ status: 'pending' \| 'denied' }` or `JoinOk` |
+| `POST /api/rooms/:id/knocks` | Host/Co-Host auth (`hostKey` or signed `identity`) | `KnockRequestInfo[]` |
+| `POST /api/rooms/:id/knocks/:rid/decide` | Host/Co-Host auth + `{ approve: boolean }` | `{ ok: true }` (updates knock state) |
+| `PATCH /api/rooms/:id/settings` | Host auth + `{ anyoneCanPresent?, knock?, password? }` | Updated `PublicRoomInfo` + syncs connected LiveKit permissions (`applyToAll`) |
+| `PATCH /api/rooms/:id/participants/:identity` | Host auth + `{ role?: 'cohost' \| 'viewer', presenter?: boolean }` | `{ ok: true }` + live updates participant JWT metadata/sources |
+| `POST /api/rooms/:id/participants/:identity/mute` | Host/Co-Host auth | `{ ok: true }` + server-side `mutePublishedTrack` |
+| `POST /api/rooms/:id/participants/:identity/remove` | Host/Co-Host auth + `{ ban?: boolean }` | `{ ok: true }` + removes from LiveKit SFU (+ optional IP/ID ban) |
+| `GET /api/oembed?id=...` | `id` (`/^[\\w-]{11}$/`) | `{ title, author }` (in-memory cached) |
+| `GET /api/gifs?q=...` | Optional search `q` (`<= 64` chars) | `ChatGif[]` via GIPHY API (`pg-13`, `limit=24`) |
 
-### LiveKit DataChannel Schema (`DATA_TOPIC = 'popcorn'`, `packages/shared/src/messages.ts`)
+### LiveKit DataChannel Protocol (`DATA_TOPIC = 'popcorn'`, `packages/shared/src/messages.ts`)
 
-| Message Tag `t` | Payload Fields | Purpose |
+| `t` Tag | Payload Fields | Trigger & Receiver Behavior |
 | :--- | :--- | :--- |
-| `hello` | — | Broadcast by newly connected participant to request current state |
-| `snapshot` | `mode`, `sync`, `queue`, `settings`, `sessionStart`, `reactions` | Sent directly to joining peer by room authority |
-| `sync` | `state: SyncState` | Play/pause/seek/video/version/serverTime update |
-| `mode` | `mode: 'idle' \| 'screen' \| 'youtube' \| 'local'` | Switches active stage component across all peers |
-| `local-meta` | `fileName`, `fileSize?`, `duration?` | Announces host-loaded local movie metadata |
-| `theme` | `theme: RoomTheme` | Syncs host-selected cinema theme across the room |
+| `hello` | — | Broadcast on room connect; authority answers with `snapshot` |
+| `snapshot` | `mode`, `sync`, `queue`, `settings`, `sessionStart`, `reactions` | Sets initial room state on joining peer |
+| `sync` | `state: SyncState` | Updates play/pause/seek/video/rate/version from authorized controller |
+| `mode` | `mode: StageMode` | Switches stage between `'idle'`, `'screen'`, `'youtube'`, `'local'` |
+| `local-meta` | `fileName`, `fileSize?`, `duration?` | Announces host's local movie filename & metadata |
+| `theme` | `theme: RoomTheme` | Syncs host-selected cinema theme across room |
 | `settings` | `settings: RoomSettings` | Syncs `openControl` & `autoPauseOnBuffer` |
-| `waiting` | `names: string[]` | Notifies room who is buffering before auto-resume |
-| `countdown` | `at: number` | Server-time target for synchronized `3-2-1` countdown |
-| `chat` | `id`, `text`, `at`, `replyTo?`, `gif?`, `vt?` | Chat message with optional quote reply, GIF & spoiler timestamp |
-| `reaction` | `emoji`, `mark: ReactionMark` | Floating live cheer + heatmap timeline mark |
-| `presence` | `hand`, `ready`, `buffering` | Peer hand-raise, ready-check & buffering flags |
-| `ready-check` | `active: boolean` | Opens/closes Queue readiness poll |
-| `queue-add` | `item: QueueItem` | Adds YouTube track (`oEmbed` enriched) to queue |
-| `queue-vote` | `id`, `up: boolean` | Upvotes/unvotes a queued track & re-sorts |
-| `queue-remove` | `id` | Removes queued item (uploader or controller) |
-| `host-mute` | — | Control signal for host mute events |
+| `waiting` | `names: string[]` | Shows/clears buffering wait banner |
+| `countdown` | `at: number` | Server-time target for synchronized `3-2-1` start |
+| `chat` | `id`, `text`, `at`, `replyTo?`, `gif?`, `vt?` | Appends chat item, manages spoiler lock & hidden-drawer toast |
+| `reaction` | `emoji`, `mark: ReactionMark` | Renders floating screen reaction & appends timeline mark |
+| `presence` | `hand`, `ready`, `buffering` | Updates member hand/ready flags & triggers 3 s buffer monitor |
+| `ready-check` | `active: boolean` | Opens/closes Queue ready poll |
+| `queue-add` | `item: QueueItem` | Inserts item and runs `sortQueue()` |
+| `queue-vote` | `id`, `up: boolean` | Toggles voter ID on queue item & re-sorts |
+| `queue-remove` | `id` | Removes item if sender is uploader or controller |
+| `host-mute` | — | Host moderation signal |
 
 ---
 
-## 12. Hard-Won Engineering Lessons & Production Bugs Solved
+## 12. Hard-Won Engineering Fixes & Production Postmortems
 
-Real production bugs uncovered and resolved across desktop/mobile testing in this codebase:
-
-1. **Opus RED (`red: true`) Distorting Stereo Music**: LiveKit SDK requires RED disabled on stereo tracks; disabling `red: false` on `ScreenShareAudio` & `local-movie-audio` stopped music dropouts and metallic distortion.
-2. **Multi-Codec Simulcast Bandwidth Doubling (`32 Mbps`)**: `BackupCodecPolicy.SIMULCAST` uploaded primary and backup video streams concurrently, choking Wi-Fi/CPU. Switching to single-stream encoding (`VP8` for Screen Share, `H.264` single stream for Local Movie) eliminated bufferbloat lag.
-3. **Inline React Ref Callback Blinking Loop (`ScreenStage`)**: An un-memoized `ref={setVideoNode}` inside a component depending on `videoElState` caused React to detach and re-attach the `<video>` stream on every render; memoizing `setVideoNode` with `useCallback` stabilized playback completely.
-4. **Local Movie Pitch/Speed-Up (`1.04×`) on Play/Resume**: A `+50 ms` lead time delayed `tick()` for a full `1500 ms` interval, triggering `decideDrift()`'s `1.04×` speedup for ~20 s. Locking `leadTime = 0 ms`, disabling rate nudging on local files, and adding a `1400 ms` grace period fixed playback speed to exact `1.0×`.
-5. **YouTube Blank Screen on Guests**: Passing stale `.mp4` filenames or `undefined` to `YT.Player`, missing `videoId` switch bypass in `applySync`, and strict mobile autoplay blocks left guests on blank iframes—fixed via strict 11-char ID gating, reload-safe `applySync`, and an explicit tap-to-watch/unmute overlay.
-6. **Camera Off/On Stuck State & Mirror Orientation**: Replacing LiveKit's `mute()`/`unmute()` (`restartTrack()`) with explicit track `stop()` + `unpublishTrack()` resolved stuck webcam toggles; unifying `flipped = true` (`-scale-x-100`) on both local and remote tiles matched orientation identically on desktop and phone.
+1. **Opus `red: true` Music Corruption:** Disabling RED (`red: false`) on stereo tracks fixed metallic cutouts caused by voice-oriented redundant packet framing over stereo music.
+2. **Multi-Codec Dual-Upload Overload (`32 Mbps`):** Eliminating `BackupCodecPolicy.SIMULCAST` (which uploaded 2 concurrent HD streams) stopped Wi-Fi bufferbloat, packet loss, and lagging audio/video.
+3. **Un-memoized Ref Detach/Attach Blinking (`ScreenStage`):** Wrapping `setVideoNode` in `useCallback(..., [])` stopped React from firing `null`/`el` teardown on every render and triggering an infinite blank-screen flicker loop.
+4. **Local File `1.04×` Fast-Playback Speedup:** Removing the `+50 ms` local play lead delay and locking `LocalStage` playback rate to `sync.rate || 1` eliminated pitch-shifted speedups after starting or unpausing movies.
+5. **YouTube Blank Screen & Mobile Collapse:** Validating 11-char YouTube IDs against leftover `.mp4` names, accepting `videoId` switches across version resets, adding `min-h-[220px]` mobile stage bounds, and providing a **Tap to Watch & Unmute** fallback eliminated blank screens on guest phones.
+6. **Camera Off/On Stuck Restart & Mirror Flip:** Stopping and unpublishing camera tracks on OFF instead of muting avoided stuck hardware webcam states; setting `flipped = true` (`-scale-x-100`) on both local and remote camera tiles ensured everyone sees the exact same right-way orientation.
 
 ---
 
-## 13. Local Development, Testing & Free-Tier Production Deployment
+## 13. Local Development, Testing & Free-Tier Deployment
 
-### Prerequisites & Local Setup
+### Prerequisites & Local Development
 - **Node.js v20+** and **npm**
 
 ```bash
@@ -420,28 +485,29 @@ git clone https://github.com/BhanuNama/Popcorn-Room.git
 cd "Popcorn Room"
 npm install
 cp apps/api/.env.example apps/api/.env
-npm run dev                  # Starts Vite (:5173, proxies /api) + Fastify API (:8787)
+npm run dev                  # Vite web (:5173, proxies /api) + Fastify API (:8787)
 ```
-*(Set your free LiveKit Cloud credentials in `apps/api/.env`, or start local LiveKit with `npm run livekit`.)*
 
-### Workspace Scripts & Automated Verification
+### Verification Commands (`package.json`)
 ```bash
 npm run typecheck            # Typechecks @popcorn/api, @popcorn/web, and @popcorn/shared
-npm test                     # Runs 18 Vitest unit tests in packages/shared/src/sync.test.ts
-npm run build                # Builds Vite production bundle (apps/web/dist) + typechecks API
-npm run test:e2e             # Runs Playwright suite (tests/room.spec.ts)
+npm test                     # Executes 18 Vitest unit tests in packages/shared/src/sync.test.ts
+npm run build                # Builds production Vite bundle + runs API typecheck
+npm run test:e2e             # Runs Playwright Chromium E2E tests (tests/room.spec.ts)
 ```
 
-### Free-Tier Production Stack & Environment Variables
+### Production Hosting & Environment Configuration
 
-| Component | Recommended Free Host | Required Configuration |
+| Tier | Host / Path | Required Variables & Notes |
 | :--- | :--- | :--- |
-| **Frontend** (`apps/web`) | **Vercel** (`https://the-orbit-room.vercel.app`) | Build: `npm run build`, Output: `dist` (SPA fallback in `vercel.json`)<br>Env: `VITE_API_URL=https://popcorn-room.onrender.com` *(no trailing `/`)* |
-| **API** (`apps/api`) | **Render** (`https://popcorn-room.onrender.com`) | Start: `npm run start -w @popcorn/api`<br>Env: `NODE_ENV=production`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `IDENTITY_SECRET`, `CORS_ORIGINS=https://the-orbit-room.vercel.app` *(exact origin, comma-separated if multiple, no trailing `/`)*<br>Optional: `MONGODB_URI`, `GIPHY_API_KEY` |
-| **WebRTC SFU** | **LiveKit Cloud** or **Oracle Cloud VM** | [cloud.livekit.io](https://cloud.livekit.io) (`50 GB/mo` free) or self-hosted via [`infra/docker-compose.yml`](infra/docker-compose.yml) (see [`infra/DEPLOYMENT.md`](infra/DEPLOYMENT.md)) |
+| **Web Frontend** | **Vercel** (`apps/web`, output `dist`, SPA rewrite `vercel.json`) | `VITE_API_URL=https://popcorn-room.onrender.com` *(exact origin, no trailing `/`)* |
+| **API Backend** | **Render** (`apps/api`, `npm run start -w @popcorn/api`) | `NODE_ENV=production` · `LIVEKIT_URL` · `LIVEKIT_API_KEY` · `LIVEKIT_API_SECRET` · `IDENTITY_SECRET` · `CORS_ORIGINS=https://the-orbit-room.vercel.app` *(exact origin(s), comma-separated, no trailing `/`)* · Optional: `MONGODB_URI`, `GIPHY_API_KEY` |
+| **Media SFU** | **LiveKit Cloud** or **Oracle Cloud Docker** | [cloud.livekit.io](https://cloud.livekit.io) (`50 GB/mo` free) or self-host via [`infra/docker-compose.yml`](infra/docker-compose.yml) (see [`infra/DEPLOYMENT.md`](infra/DEPLOYMENT.md)) |
 
 ---
 
-## Privacy & Security Notice
+<div align="center">
 
-Media streams, camera feeds, subtitles, and voice tracks are transmitted directly over encrypted WebRTC (`DTLS/SRTP`) without server-side media recording or file persistence. Built for private watch parties among friends.
+*All voice, video, screen shares, and local movie streams travel directly over encrypted WebRTC (`DTLS/SRTP`) with zero server-side recording or storage.*
+
+</div>
