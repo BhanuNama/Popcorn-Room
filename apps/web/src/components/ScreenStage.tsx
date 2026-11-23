@@ -40,7 +40,7 @@ export function ScreenStage() {
   const [sharerName, setSharerName] = useState<string>('');
   const [hasVideo, setHasVideo] = useState(false);
   const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
-  const [showHostPreview, setShowHostPreview] = useState(false);
+  const [showHostPreview, setShowHostPreview] = useState(true);
 
   useEffect(() => {
     const el = videoRef.current;
