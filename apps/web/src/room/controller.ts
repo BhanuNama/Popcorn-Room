@@ -1347,7 +1347,7 @@ class RoomController {
     this.onLocalShareEnded();
   }
 
-  /** Capture and stream the host's local <video> element live to room guests so phones/others watch immediately without needing the file locally. */
+  /** Capture and stream the host's local <video> element live at smooth 1080p30 max using hardware-friendly H.264 + parallel A/V sync. */
   async startLocalMovieStream(videoEl: HTMLVideoElement) {
     const lp = this.room?.localParticipant;
     if (!lp || !parseMeta(lp.metadata).presenter) return;
@@ -1359,38 +1359,57 @@ class RoomController {
     }
 
     const capFn =
-      (videoEl as HTMLVideoElement & { captureStream?: () => MediaStream; mozCaptureStream?: () => MediaStream })
+      (videoEl as HTMLVideoElement & { captureStream?: (fps?: number) => MediaStream; mozCaptureStream?: (fps?: number) => MediaStream })
         .captureStream ||
-      (videoEl as HTMLVideoElement & { mozCaptureStream?: () => MediaStream }).mozCaptureStream;
+      (videoEl as HTMLVideoElement & { mozCaptureStream?: (fps?: number) => MediaStream }).mozCaptureStream;
     if (typeof capFn !== 'function') return;
 
     let stream: MediaStream;
     try {
-      stream = capFn.call(videoEl);
+      // Request steady 30fps capture so 4K/60fps local files don't swamp browser frame capture
+      stream = capFn.call(videoEl, 30);
     } catch {
       return;
     }
     this.localMovieStreamEl = videoEl;
 
+    // Downscale > 1080p streams cleanly in WebRTC GPU scaler so 4K movies stream fast with zero choppiness
+    const scaleDown = videoEl.videoWidth > 1920 ? Math.min(2.5, Math.round((videoEl.videoWidth / 1920) * 100) / 100) : 1;
+    const movieBitrate = 5_500_000;
+
     const publishVideoTrack = async (track: MediaStreamTrack) => {
       if (this.localMovieStreamEl !== videoEl || this.localMovieTracks.includes(track)) return;
       this.localMovieTracks.push(track);
       try {
-        await lp.publishTrack(track, {
+        const pub = await lp.publishTrack(track, {
           name: 'local-movie-video',
           source: Track.Source.ScreenShare,
           stream: 'local-movie',
           simulcast: false,
-          scalabilityMode: 'L1T2',
-          videoCodec: 'vp9',
+          videoCodec: 'h264', // Hardware GPU encode/decode on laptop & phone for ultra-fast smooth FPS
           backupCodecPolicy: BackupCodecPolicy.SIMULCAST,
           backupCodec: {
             codec: 'vp8',
-            encoding: { maxBitrate: 10_000_000, maxFramerate: 30, priority: 'high' },
+            encoding: { maxBitrate: movieBitrate, maxFramerate: 30, priority: 'high' },
           },
-          screenShareEncoding: { maxBitrate: 10_000_000, maxFramerate: 30, priority: 'high' },
-          degradationPreference: 'maintain-resolution',
+          screenShareEncoding: { maxBitrate: movieBitrate, maxFramerate: 30, priority: 'high' },
+          degradationPreference: 'balanced',
         });
+
+        const sender = pub.track?.sender;
+        if (sender) {
+          try {
+            const params = sender.getParameters();
+            if (params.encodings?.length) {
+              params.encodings[0].scaleResolutionDownBy = scaleDown;
+              params.encodings[0].maxBitrate = movieBitrate;
+              params.encodings[0].maxFramerate = 30;
+              params.encodings[0].priority = 'high';
+              params.degradationPreference = 'balanced';
+              await sender.setParameters(params);
+            }
+          } catch {}
+        }
       } catch {
         // ignore duplicate or disconnected publish errors
       }
@@ -1404,7 +1423,7 @@ class RoomController {
           name: 'local-movie-audio',
           source: Track.Source.ScreenShareAudio,
           stream: 'local-movie',
-          audioPreset: { maxBitrate: 256_000 },
+          audioPreset: { maxBitrate: 192_000 },
           forceStereo: true,
           dtx: false,
           red: true,
@@ -1415,16 +1434,19 @@ class RoomController {
     };
 
     const vTrack = stream.getVideoTracks()[0];
+    const aTrack = stream.getAudioTracks()[0];
+    const pubJobs: Promise<void>[] = [];
     if (vTrack) {
       vTrack.contentHint = 'motion';
-      await publishVideoTrack(vTrack);
+      pubJobs.push(publishVideoTrack(vTrack));
     }
-    const aTrack = stream.getAudioTracks()[0];
     if (aTrack) {
-      await publishAudioTrack(aTrack);
+      pubJobs.push(publishAudioTrack(aTrack));
     }
+    // Publish video & audio together in parallel so WebRTC locks lip-sync timestamps from frame 1
+    await Promise.all(pubJobs);
 
-    // Chromium often adds the audio track slightly after play() starts
+    // Handle audio track added slightly after play() begins
     stream.addEventListener('addtrack', (ev) => {
       if (this.localMovieStreamEl !== videoEl) return;
       if (ev.track.kind === 'video') {

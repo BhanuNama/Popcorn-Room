@@ -664,12 +664,7 @@ export function LocalStage() {
             ref={setVideoNode}
             src={localMovie.url}
             onLoadedMetadata={onLoadedMetadata}
-            onLoadedData={() => {
-              if (videoRef.current && isController) {
-                void controller.startLocalMovieStream(videoRef.current);
-              }
-            }}
-            onPlay={() => {
+            onPlaying={() => {
               if (videoRef.current && isController) {
                 void controller.startLocalMovieStream(videoRef.current);
               }
