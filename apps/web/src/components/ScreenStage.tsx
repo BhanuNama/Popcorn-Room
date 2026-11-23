@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Track } from 'livekit-client';
 import {
@@ -24,10 +24,11 @@ import { toggleRoomFullscreen } from '@/lib/fullscreen';
 export function ScreenStage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoElState, setVideoElState] = useState<HTMLVideoElement | null>(null);
-  const setVideoNode = (el: HTMLVideoElement | null) => {
+  // Memoize ref callback so React doesn't invoke null/el on every re-render and trigger a detach/attach blink loop
+  const setVideoNode = useCallback((el: HTMLVideoElement | null) => {
     videoRef.current = el;
-    if (el !== videoElState) setVideoElState(el);
-  };
+    setVideoElState((prev) => (prev === el ? prev : el));
+  }, []);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const localSharing = useRoom((s) => s.local.sharing);
@@ -83,11 +84,6 @@ export function ScreenStage() {
           const vPub = p.getTrackPublication(Track.Source.ScreenShare);
           const aPub = p.getTrackPublication(Track.Source.ScreenShareAudio);
           if (vPub && vPub.track) {
-            const audioArrivedAfterVideo = Boolean(aPub?.track && attachedAudio !== aPub.track && attachedVideo === vPub.track);
-            if (audioArrivedAfterVideo && attachedVideo) {
-              attachedVideo.detach(videoEl);
-              attachedVideo = null;
-            }
             if (attachedVideo !== vPub.track) {
               if (attachedVideo) attachedVideo.detach(videoEl);
               attachedVideo = vPub.track;
