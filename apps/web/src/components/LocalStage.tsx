@@ -101,6 +101,12 @@ export function LocalStage() {
         const vPub = p.getTrackPublication(Track.Source.ScreenShare);
         const aPub = p.getTrackPublication(Track.Source.ScreenShareAudio);
         if (vPub?.track) {
+          const audioArrivedAfterVideo = Boolean(aPub?.track && attachedAudio !== aPub.track && attachedVideo === vPub.track);
+          if (audioArrivedAfterVideo && attachedVideo) {
+            // Re-attach video & audio together so Chromium initializes ONE locked A/V clock
+            attachedVideo.detach(videoEl);
+            attachedVideo = null;
+          }
           if (attachedVideo !== vPub.track) {
             if (attachedVideo) attachedVideo.detach(videoEl);
             attachedVideo = vPub.track;

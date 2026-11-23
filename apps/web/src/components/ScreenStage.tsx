@@ -83,6 +83,11 @@ export function ScreenStage() {
           const vPub = p.getTrackPublication(Track.Source.ScreenShare);
           const aPub = p.getTrackPublication(Track.Source.ScreenShareAudio);
           if (vPub && vPub.track) {
+            const audioArrivedAfterVideo = Boolean(aPub?.track && attachedAudio !== aPub.track && attachedVideo === vPub.track);
+            if (audioArrivedAfterVideo && attachedVideo) {
+              attachedVideo.detach(videoEl);
+              attachedVideo = null;
+            }
             if (attachedVideo !== vPub.track) {
               if (attachedVideo) attachedVideo.detach(videoEl);
               attachedVideo = vPub.track;

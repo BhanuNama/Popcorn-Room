@@ -1267,7 +1267,7 @@ class RoomController {
         .catch(() => {});
     }
 
-    const targetBitrate = share60 ? 12_000_000 : 10_000_000;
+    const targetBitrate = share60 ? 8_500_000 : 7_000_000;
     const targetFps = share60 ? 60 : 30;
     const capture: ScreenShareCaptureOptions = {
       audio: SCREEN_AUDIO_CAPTURE,
@@ -1281,20 +1281,20 @@ class RoomController {
       surfaceSwitching: 'include',
     };
     const publish: TrackPublishOptions = {
-      audioPreset: { maxBitrate: 256_000 }, // transparent Opus
+      audioPreset: { maxBitrate: 256_000 }, // pure transparent 256kbps stereo Opus
       forceStereo: true,
       dtx: false, // never stop sending in quiet scenes
-      red: true, // redundancy hides packet loss
+      red: false, // RED MUST be disabled for stereo music (prevents distortion & dropouts)
       simulcast: false, // single full-resolution layer
-      scalabilityMode: 'L1T2', // disable 3-spatial-layer L3T3_KEY starvation/grain
+      scalabilityMode: 'L1T1', // zero SVC layer splitting
       videoCodec: 'vp9',
-      backupCodecPolicy: BackupCodecPolicy.SIMULCAST, // never force-regress capable clients into backup codec
+      backupCodecPolicy: BackupCodecPolicy.REGRESSION, // never upload two 8Mbps streams concurrently
       backupCodec: {
-        codec: 'vp8', // avoids H.264 16-235 limited-range color washout while keeping mobile/legacy compatibility
+        codec: 'vp8',
         encoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
       },
       screenShareEncoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
-      degradationPreference: 'maintain-resolution', // preserve sharpness and colors rather than downscaling/blurring
+      degradationPreference: 'maintain-resolution',
     };
 
     try {
@@ -1373,9 +1373,9 @@ class RoomController {
     }
     this.localMovieStreamEl = videoEl;
 
-    // 1:1 full clarity (16 Mbps hardware H.264 + maintain-resolution; scale down only extreme >1440p feeds cleanly)
-    const scaleDown = videoEl.videoWidth > 2560 ? Math.min(2, Math.round((videoEl.videoWidth / 1920) * 100) / 100) : 1;
-    const movieBitrate = 16_000_000;
+    // Encode up to 1080p native resolution at 7.5 Mbps single-stream hardware H.264 (zero bufferbloat, sharp clarity)
+    const scaleDown = videoEl.videoWidth > 1920 ? Math.min(2.5, Math.round((videoEl.videoWidth / 1920) * 100) / 100) : 1;
+    const movieBitrate = 7_500_000;
 
     const publishVideoTrack = async (track: MediaStreamTrack) => {
       if (this.localMovieStreamEl !== videoEl || this.localMovieTracks.includes(track)) return;
@@ -1386,12 +1386,8 @@ class RoomController {
           source: Track.Source.ScreenShare,
           stream: 'local-movie',
           simulcast: false,
-          videoCodec: 'h264', // Hardware GPU encode/decode for zero lag at full resolution
-          backupCodecPolicy: BackupCodecPolicy.SIMULCAST,
-          backupCodec: {
-            codec: 'vp8',
-            encoding: { maxBitrate: movieBitrate, maxFramerate: 60, priority: 'high' },
-          },
+          videoCodec: 'h264', // Hardware GPU encode/decode supported on desktop & mobile (zero dual-simulcast upload)
+          backupCodec: false,
           screenShareEncoding: { maxBitrate: movieBitrate, maxFramerate: 60, priority: 'high' },
           degradationPreference: 'maintain-resolution',
         });
@@ -1418,15 +1414,23 @@ class RoomController {
     const publishAudioTrack = async (track: MediaStreamTrack) => {
       if (this.localMovieStreamEl !== videoEl || this.localMovieTracks.includes(track)) return;
       this.localMovieTracks.push(track);
+      // Ensure Chromium APM (AEC/NS/AGC) stays strictly off on local movie music track
+      try {
+        await track.applyConstraints({
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        } as MediaTrackConstraints);
+      } catch {}
       try {
         await lp.publishTrack(track, {
           name: 'local-movie-audio',
           source: Track.Source.ScreenShareAudio,
           stream: 'local-movie',
-          audioPreset: { maxBitrate: 320_000 }, // 320 kbps transparent stereo audio
+          audioPreset: { maxBitrate: 256_000 },
           forceStereo: true,
           dtx: false,
-          red: true,
+          red: false, // Must be false on stereo Opus music tracks to avoid distortion/dropouts
         });
       } catch {
         // ignore
