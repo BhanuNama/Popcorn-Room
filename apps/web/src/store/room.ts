@@ -173,7 +173,7 @@ const audioDefaults: AudioPrefs = {
   friendsVolume: loadPref('friendsVolume', 0.9),
   smartDuck: loadPref('smartDuck', false),
   pushToTalk: loadPref('pushToTalk', false),
-  share60: loadPref('share60', false),
+  share60: loadPref('share60', true),
   echoCancellation: loadPref('echoCancellation', false),
   micDeviceId: loadPref('micDeviceId', ''),
 };

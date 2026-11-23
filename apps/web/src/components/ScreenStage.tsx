@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Track } from 'livekit-client';
 import {
   MonitorUp,
+  MonitorOff,
+  Eye,
   AlertTriangle,
   VolumeX,
   Volume2,
@@ -38,6 +40,7 @@ export function ScreenStage() {
   const [sharerName, setSharerName] = useState<string>('');
   const [hasVideo, setHasVideo] = useState(false);
   const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
+  const [showHostPreview, setShowHostPreview] = useState(false);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -196,8 +199,8 @@ export function ScreenStage() {
       onDrop={onDrop}
       className="group relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl p-1 sm:p-2"
     >
-      {/* Ambient Glow behind video */}
-      <AmbientGlow videoEl={videoElState} active={hasVideo} />
+      {/* Ambient Glow behind remote video (skip on presenter to keep 100% GPU free for screen encoding) */}
+      <AmbientGlow videoEl={videoElState} active={hasVideo && !localSharing} />
 
       {/* Actual video element — attaches both video & audio on viewers for hardware A/V sync */}
       <video
@@ -214,9 +217,49 @@ export function ScreenStage() {
           }
         }}
         className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${
-          !hasVideo ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
+          !hasVideo || (localSharing && !showHostPreview) ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
         }`}
       />
+
+      {/* Lightweight zero-GPU Presenter Screen Share Console (avoids hall-of-mirrors & GPU contention) */}
+      {hasVideo && localSharing && !showHostPreview && (
+        <div className="relative z-10 flex max-w-md flex-col items-center justify-center p-6 text-center text-white">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-coral-500/20 text-coral-300 ring-1 ring-coral-400/40 shadow-glow">
+            <MonitorUp size={28} />
+          </div>
+          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-semibold text-emerald-300 ring-1 ring-emerald-400/30 mb-3">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            Live Screen &amp; Stereo Audio Active
+          </div>
+          <h3 className="font-display text-xl font-bold tracking-tight">You are sharing your screen</h3>
+          <p className="mt-1.5 text-xs sm:text-sm text-white/55 leading-relaxed">
+            Preview is paused on your screen to eliminate echo loops and dedicate maximum GPU speed to your viewers.
+          </p>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+            <button
+              onClick={() => controller.stopShare()}
+              className="butter-btn flex items-center gap-1.5 rounded-xl bg-red-500 hover:bg-red-600 px-4 py-2.5 text-xs font-semibold text-white shadow"
+            >
+              <MonitorOff size={14} /> Stop Sharing
+            </button>
+            <button
+              onClick={() => setShowHostPreview(true)}
+              className="butter-btn flex items-center gap-1.5 rounded-xl bg-white/[0.08] hover:bg-white/[0.15] px-4 py-2.5 text-xs font-semibold text-white/85 ring-1 ring-white/15"
+            >
+              <Eye size={14} /> Show Preview
+            </button>
+          </div>
+        </div>
+      )}
+
+      {hasVideo && localSharing && showHostPreview && (
+        <button
+          onClick={() => setShowHostPreview(false)}
+          className="butter-btn absolute bottom-4 right-4 z-20 flex items-center gap-1.5 rounded-xl bg-ink-950/85 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/15 backdrop-blur-md hover:bg-ink-900"
+        >
+          Hide Preview (Save GPU)
+        </button>
+      )}
 
       {hasVideo && !localSharing && remoteAudioBlocked && (
         <button

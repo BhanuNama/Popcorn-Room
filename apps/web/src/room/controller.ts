@@ -232,6 +232,12 @@ class RoomController {
         if (pub.source === Track.Source.ScreenShare) {
           pub.setVideoQuality(VideoQuality.HIGH);
         }
+        if (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio) {
+          // Lock tight 120ms playout delay on BOTH screen video & stereo audio so neither builds 1s+ lag or drifts out of sync
+          try {
+            track.setPlayoutDelay(0.12);
+          } catch {}
+        }
         refresh();
       })
       .on(RoomEvent.TrackUnsubscribed, (track) => {
@@ -1266,7 +1272,7 @@ class RoomController {
         .catch(() => {});
     }
 
-    const targetBitrate = share60 ? 6_500_000 : 4_800_000;
+    const targetBitrate = share60 ? 6_000_000 : 4_500_000;
     const targetFps = share60 ? 60 : 30;
     const capture: ScreenShareCaptureOptions = {
       audio: SCREEN_AUDIO_CAPTURE,
@@ -1284,12 +1290,8 @@ class RoomController {
       dtx: false, // never stop sending in quiet scenes
       red: false, // RED must be disabled for stereo music
       simulcast: false, // single clean stream
-      videoCodec: 'h264', // GPU hardware encode/decode eliminates VP9 CPU lag & >1s A/V desync
-      backupCodecPolicy: BackupCodecPolicy.REGRESSION,
-      backupCodec: {
-        codec: 'vp8',
-        encoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
-      },
+      videoCodec: 'vp8', // Fastest sub-50ms hardware/libvpx encode across Windows, Mac, Android & iOS (zero OpenH264/VP9 lag)
+      backupCodec: false,
       screenShareEncoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
       degradationPreference: 'balanced', // keeps video tightly synced with audio instead of stalling frames
     };
