@@ -510,4 +510,10 @@ npm run test:e2e             # Runs Playwright Chromium E2E tests (tests/room.sp
 
 *All voice, video, screen shares, and local movie streams travel directly over encrypted WebRTC (`DTLS/SRTP`) with zero server-side recording or storage.*
 
+<br/>
+
+**🪐 Orbited by [Bhanu](https://github.com/BhanuNama)**
+<br/>
+*One screen at the center. Everyone in sync. Zero compromises on sound.*
+
 </div>
