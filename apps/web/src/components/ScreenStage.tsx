@@ -98,13 +98,15 @@ export function ScreenStage() {
             } else if (!aPub?.track) {
               videoEl.muted = true;
             }
-            void videoEl.play().catch((err) => {
-              if (err?.name === 'NotAllowedError') {
-                videoEl.muted = true;
-                setRemoteAudioBlocked(true);
-                void videoEl.play().catch(() => {});
-              }
-            });
+            if (videoEl.paused) {
+              void videoEl.play().catch((err) => {
+                if (err?.name === 'NotAllowedError') {
+                  videoEl.muted = true;
+                  setRemoteAudioBlocked(true);
+                  void videoEl.play().catch(() => {});
+                }
+              });
+            }
             setRemoteAudioBlocked(Boolean(aPub?.track && videoEl.muted));
             setSharerName(p.name || p.identity);
             setHasVideo(true);

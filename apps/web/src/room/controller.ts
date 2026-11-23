@@ -9,7 +9,6 @@ import {
   type RemoteTrack,
   Room,
   RoomEvent,
-  ScreenSharePresets,
   Track,
   type TrackPublishOptions,
   type ScreenShareCaptureOptions,
@@ -1267,15 +1266,14 @@ class RoomController {
         .catch(() => {});
     }
 
-    const targetBitrate = share60 ? 8_500_000 : 7_000_000;
+    const targetBitrate = share60 ? 6_500_000 : 4_800_000;
     const targetFps = share60 ? 60 : 30;
     const capture: ScreenShareCaptureOptions = {
       audio: SCREEN_AUDIO_CAPTURE,
-      resolution: share60 ? { width: 1920, height: 1080, frameRate: 60 } : ScreenSharePresets.h1080fps30.resolution,
-      contentHint: 'motion', // smooth gradients & true movie color (avoids detail/text palette grain)
+      resolution: { width: 1920, height: 1080, frameRate: targetFps },
+      contentHint: 'motion', // smooth movie playback without text-palette frame stalling
       systemAudio: 'include',
-      // NOTE: the blueprint suggested `true`, but that silences the shared tab for the presenter
-      // (they never receive their own stream back). Keep local playback so the host hears it too.
+      // Keep local playback so the host hears it too.
       suppressLocalAudioPlayback: false,
       selfBrowserSurface: 'exclude',
       surfaceSwitching: 'include',
@@ -1284,17 +1282,16 @@ class RoomController {
       audioPreset: { maxBitrate: 256_000 }, // pure transparent 256kbps stereo Opus
       forceStereo: true,
       dtx: false, // never stop sending in quiet scenes
-      red: false, // RED MUST be disabled for stereo music (prevents distortion & dropouts)
-      simulcast: false, // single full-resolution layer
-      scalabilityMode: 'L1T1', // zero SVC layer splitting
-      videoCodec: 'vp9',
-      backupCodecPolicy: BackupCodecPolicy.REGRESSION, // never upload two 8Mbps streams concurrently
+      red: false, // RED must be disabled for stereo music
+      simulcast: false, // single clean stream
+      videoCodec: 'h264', // GPU hardware encode/decode eliminates VP9 CPU lag & >1s A/V desync
+      backupCodecPolicy: BackupCodecPolicy.REGRESSION,
       backupCodec: {
         codec: 'vp8',
         encoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
       },
       screenShareEncoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
-      degradationPreference: 'maintain-resolution',
+      degradationPreference: 'balanced', // keeps video tightly synced with audio instead of stalling frames
     };
 
     try {
@@ -1304,16 +1301,18 @@ class RoomController {
       if (mst) {
         mst.contentHint = 'motion';
       }
+      const capWidth = mst?.getSettings().width ?? 1920;
+      const scaleDown = capWidth > 1920 ? Math.min(2.5, Math.round((capWidth / 1920) * 100) / 100) : 1;
       const sender = pub?.track?.sender;
       if (sender) {
         try {
           const params = sender.getParameters();
           if (params.encodings?.length) {
-            params.encodings[0].scaleResolutionDownBy = 1;
+            params.encodings[0].scaleResolutionDownBy = scaleDown;
             params.encodings[0].maxBitrate = targetBitrate;
             params.encodings[0].maxFramerate = targetFps;
             params.encodings[0].priority = 'high';
-            params.degradationPreference = 'maintain-resolution';
+            params.degradationPreference = 'balanced';
             await sender.setParameters(params);
           }
         } catch {
