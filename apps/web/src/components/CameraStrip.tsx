@@ -134,7 +134,8 @@ function CameraTile({
   layout: 'side' | 'bottom';
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [flipped, setFlipped] = useState(false);
+  // Windows/mobile front cameras need horizontal inversion (-scale-x-100) so local & remote views match identically
+  const [flipped, setFlipped] = useState(true);
 
   // Attach participant camera track immediately and handle first-time subscribe / unmute events cleanly
   useEffect(() => {
@@ -256,7 +257,7 @@ function CameraTile({
             onClick={() => setFlipped((v) => !v)}
             className={cn(
               'grid h-6 w-6 place-items-center rounded-lg bg-black/60 text-white backdrop-blur transition-opacity',
-              flipped ? 'opacity-100 text-coral-300 ring-1 ring-coral-400/40' : 'opacity-0 group-hover:opacity-100',
+              !flipped ? 'opacity-100 text-coral-300 ring-1 ring-coral-400/40' : 'opacity-0 group-hover:opacity-100',
             )}
             title={flipped ? 'Unflip camera view' : 'Flip camera horizontally'}
           >
