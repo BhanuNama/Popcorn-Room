@@ -1,4 +1,5 @@
 import {
+  BackupCodecPolicy,
   ConnectionQuality,
   DisconnectReason,
   LocalTrackPublication,
@@ -14,6 +15,7 @@ import {
   type ScreenShareCaptureOptions,
   type AudioCaptureOptions,
   VideoPresets,
+  VideoQuality,
 } from 'livekit-client';
 import { toast } from 'sonner';
 import {
@@ -222,9 +224,12 @@ class RoomController {
         this.onBufferingChanged(p.identity, false);
         refresh();
       })
-      .on(RoomEvent.TrackSubscribed, (track, _pub, p) => {
+      .on(RoomEvent.TrackSubscribed, (track, pub, p) => {
         this.attachAudio(track);
         this.applyVolumesFor(p);
+        if (pub.source === Track.Source.ScreenShare) {
+          pub.setVideoQuality(VideoQuality.HIGH);
+        }
         refresh();
       })
       .on(RoomEvent.TrackUnsubscribed, (track) => {
@@ -1189,10 +1194,12 @@ class RoomController {
         .catch(() => {});
     }
 
+    const targetBitrate = share60 ? 12_000_000 : 10_000_000;
+    const targetFps = share60 ? 60 : 30;
     const capture: ScreenShareCaptureOptions = {
       audio: SCREEN_AUDIO_CAPTURE,
       resolution: share60 ? { width: 1920, height: 1080, frameRate: 60 } : ScreenSharePresets.h1080fps30.resolution,
-      contentHint: 'detail', // keep crisp edges, sharp text, and accurate colors
+      contentHint: 'motion', // smooth gradients & true movie color (avoids detail/text palette grain)
       systemAudio: 'include',
       // NOTE: the blueprint suggested `true`, but that silences the shared tab for the presenter
       // (they never receive their own stream back). Keep local playback so the host hears it too.
@@ -1205,15 +1212,41 @@ class RoomController {
       forceStereo: true,
       dtx: false, // never stop sending in quiet scenes
       red: true, // redundancy hides packet loss
-      simulcast: false, // always deliver full native resolution instead of blurry lower layers
+      simulcast: false, // single full-resolution layer
+      scalabilityMode: 'L1T2', // disable 3-spatial-layer L3T3_KEY starvation/grain
       videoCodec: 'vp9',
-      backupCodec: { codec: 'h264' },
-      screenShareEncoding: { maxBitrate: share60 ? 12_000_000 : 9_000_000, maxFramerate: share60 ? 60 : 30 },
+      backupCodecPolicy: BackupCodecPolicy.SIMULCAST, // never force-regress capable clients into backup codec
+      backupCodec: {
+        codec: 'vp8', // avoids H.264 16-235 limited-range color washout while keeping mobile/legacy compatibility
+        encoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
+      },
+      screenShareEncoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
       degradationPreference: 'maintain-resolution', // preserve sharpness and colors rather than downscaling/blurring
     };
 
     try {
       await lp.setScreenShareEnabled(true, capture, publish);
+      const pub = lp.getTrackPublication(Track.Source.ScreenShare);
+      const mst = pub?.track?.mediaStreamTrack;
+      if (mst) {
+        mst.contentHint = 'motion';
+      }
+      const sender = pub?.track?.sender;
+      if (sender) {
+        try {
+          const params = sender.getParameters();
+          if (params.encodings?.length) {
+            params.encodings[0].scaleResolutionDownBy = 1;
+            params.encodings[0].maxBitrate = targetBitrate;
+            params.encodings[0].maxFramerate = targetFps;
+            params.encodings[0].priority = 'high';
+            params.degradationPreference = 'maintain-resolution';
+            await sender.setParameters(params);
+          }
+        } catch {
+          // Some browsers disallow mutating certain sender fields; safe to ignore
+        }
+      }
     } catch (e) {
       const err = e as Error;
       if (err.name !== 'NotAllowedError') toast.error('Could not start screen share', { description: err.message });
