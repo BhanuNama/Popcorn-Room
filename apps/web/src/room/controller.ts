@@ -1347,7 +1347,7 @@ class RoomController {
     this.onLocalShareEnded();
   }
 
-  /** Capture and stream the host's local <video> element live at smooth 1080p30 max using hardware-friendly H.264 + parallel A/V sync. */
+  /** Capture and stream the host's local <video> element live at native FPS and full clarity with parallel hardware H.264 + A/V lock. */
   async startLocalMovieStream(videoEl: HTMLVideoElement) {
     const lp = this.room?.localParticipant;
     if (!lp || !parseMeta(lp.metadata).presenter) return;
@@ -1359,23 +1359,23 @@ class RoomController {
     }
 
     const capFn =
-      (videoEl as HTMLVideoElement & { captureStream?: (fps?: number) => MediaStream; mozCaptureStream?: (fps?: number) => MediaStream })
+      (videoEl as HTMLVideoElement & { captureStream?: () => MediaStream; mozCaptureStream?: () => MediaStream })
         .captureStream ||
-      (videoEl as HTMLVideoElement & { mozCaptureStream?: (fps?: number) => MediaStream }).mozCaptureStream;
+      (videoEl as HTMLVideoElement & { mozCaptureStream?: () => MediaStream }).mozCaptureStream;
     if (typeof capFn !== 'function') return;
 
     let stream: MediaStream;
     try {
-      // Request steady 30fps capture so 4K/60fps local files don't swamp browser frame capture
-      stream = capFn.call(videoEl, 30);
+      // Uncapped native frame rate (preserves exact 24fps/30fps/60fps motion without 3:2 judder)
+      stream = capFn.call(videoEl);
     } catch {
       return;
     }
     this.localMovieStreamEl = videoEl;
 
-    // Downscale > 1080p streams cleanly in WebRTC GPU scaler so 4K movies stream fast with zero choppiness
-    const scaleDown = videoEl.videoWidth > 1920 ? Math.min(2.5, Math.round((videoEl.videoWidth / 1920) * 100) / 100) : 1;
-    const movieBitrate = 5_500_000;
+    // 1:1 full clarity (16 Mbps hardware H.264 + maintain-resolution; scale down only extreme >1440p feeds cleanly)
+    const scaleDown = videoEl.videoWidth > 2560 ? Math.min(2, Math.round((videoEl.videoWidth / 1920) * 100) / 100) : 1;
+    const movieBitrate = 16_000_000;
 
     const publishVideoTrack = async (track: MediaStreamTrack) => {
       if (this.localMovieStreamEl !== videoEl || this.localMovieTracks.includes(track)) return;
@@ -1386,14 +1386,14 @@ class RoomController {
           source: Track.Source.ScreenShare,
           stream: 'local-movie',
           simulcast: false,
-          videoCodec: 'h264', // Hardware GPU encode/decode on laptop & phone for ultra-fast smooth FPS
+          videoCodec: 'h264', // Hardware GPU encode/decode for zero lag at full resolution
           backupCodecPolicy: BackupCodecPolicy.SIMULCAST,
           backupCodec: {
             codec: 'vp8',
-            encoding: { maxBitrate: movieBitrate, maxFramerate: 30, priority: 'high' },
+            encoding: { maxBitrate: movieBitrate, maxFramerate: 60, priority: 'high' },
           },
-          screenShareEncoding: { maxBitrate: movieBitrate, maxFramerate: 30, priority: 'high' },
-          degradationPreference: 'balanced',
+          screenShareEncoding: { maxBitrate: movieBitrate, maxFramerate: 60, priority: 'high' },
+          degradationPreference: 'maintain-resolution',
         });
 
         const sender = pub.track?.sender;
@@ -1403,9 +1403,9 @@ class RoomController {
             if (params.encodings?.length) {
               params.encodings[0].scaleResolutionDownBy = scaleDown;
               params.encodings[0].maxBitrate = movieBitrate;
-              params.encodings[0].maxFramerate = 30;
+              params.encodings[0].maxFramerate = 60;
               params.encodings[0].priority = 'high';
-              params.degradationPreference = 'balanced';
+              params.degradationPreference = 'maintain-resolution';
               await sender.setParameters(params);
             }
           } catch {}
@@ -1423,7 +1423,7 @@ class RoomController {
           name: 'local-movie-audio',
           source: Track.Source.ScreenShareAudio,
           stream: 'local-movie',
-          audioPreset: { maxBitrate: 192_000 },
+          audioPreset: { maxBitrate: 320_000 }, // 320 kbps transparent stereo audio
           forceStereo: true,
           dtx: false,
           red: true,
@@ -1518,6 +1518,8 @@ class RoomController {
 
   private attachAudio(track: RemoteTrack) {
     if (track.kind !== Track.Kind.Audio || !this.audioHost) return;
+    // ScreenShareAudio attaches directly onto the <video> element in LocalStage/ScreenStage for hardware A/V lip-sync
+    if (track.source === Track.Source.ScreenShareAudio) return;
     const el = track.attach();
     this.audioHost.appendChild(el);
   }

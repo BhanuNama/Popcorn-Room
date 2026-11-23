@@ -32,37 +32,79 @@ export function ScreenStage() {
 
   const localSharing = useRoom((s) => s.local.sharing);
   const warnings = useRoom((s) => s.warnings);
+  const streamVolume = useRoom((s) => s.audio.streamVolume);
+  const duck = useRoom((s) => s.duck);
   const [sharerName, setSharerName] = useState<string>('');
   const [hasVideo, setHasVideo] = useState(false);
+  const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
 
-  // Find who has an active screen share track
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || localSharing) return;
+    el.volume = Math.max(0, Math.min(1, streamVolume * duck));
+  }, [streamVolume, duck, localSharing, hasVideo]);
+
+  // Attach ScreenShare video & ScreenShareAudio onto ONE <video> element for hardware A/V lip-sync
   useEffect(() => {
     const room = controller.room;
     if (!room) return;
 
-    let attachedTrack: Track | null = null;
+    let attachedVideo: Track | null = null;
+    let attachedAudio: Track | null = null;
     const videoEl = videoRef.current;
 
     const attachSharer = () => {
-      // 1. Check local participant
+      if (!videoEl) return;
+
+      // 1. Check local presenter preview (must stay muted so presenter hears original tab without echo)
       if (room.localParticipant.isScreenShareEnabled) {
         const pub = room.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-        if (pub && pub.track && videoEl) {
-          pub.track.attach(videoEl);
-          attachedTrack = pub.track;
+        if (pub && pub.track) {
+          if (attachedAudio) {
+            attachedAudio.detach(videoEl);
+            attachedAudio = null;
+          }
+          videoEl.muted = true;
+          if (attachedVideo !== pub.track) {
+            if (attachedVideo) attachedVideo.detach(videoEl);
+            attachedVideo = pub.track;
+            pub.track.attach(videoEl);
+          }
           setSharerName('You (Presenting)');
+          setRemoteAudioBlocked(false);
           setHasVideo(true);
           return;
         }
       }
 
-      // 2. Check remote participants
+      // 2. Check remote presenter
       for (const p of room.remoteParticipants.values()) {
         if (p.isScreenShareEnabled) {
-          const pub = p.getTrackPublication(Track.Source.ScreenShare);
-          if (pub && pub.track && videoEl) {
-            pub.track.attach(videoEl);
-            attachedTrack = pub.track;
+          const vPub = p.getTrackPublication(Track.Source.ScreenShare);
+          const aPub = p.getTrackPublication(Track.Source.ScreenShareAudio);
+          if (vPub && vPub.track) {
+            if (attachedVideo !== vPub.track) {
+              if (attachedVideo) attachedVideo.detach(videoEl);
+              attachedVideo = vPub.track;
+              vPub.track.attach(videoEl);
+            }
+            if (aPub?.track && attachedAudio !== aPub.track) {
+              if (attachedAudio) attachedAudio.detach(videoEl);
+              attachedAudio = aPub.track;
+              videoEl.muted = false;
+              videoEl.volume = Math.max(0, Math.min(1, useRoom.getState().audio.streamVolume * useRoom.getState().duck));
+              aPub.track.attach(videoEl);
+            } else if (!aPub?.track) {
+              videoEl.muted = true;
+            }
+            void videoEl.play().catch((err) => {
+              if (err?.name === 'NotAllowedError') {
+                videoEl.muted = true;
+                setRemoteAudioBlocked(true);
+                void videoEl.play().catch(() => {});
+              }
+            });
+            setRemoteAudioBlocked(Boolean(aPub?.track && videoEl.muted));
             setSharerName(p.name || p.identity);
             setHasVideo(true);
             return;
@@ -70,7 +112,16 @@ export function ScreenStage() {
         }
       }
 
+      if (attachedVideo) {
+        attachedVideo.detach(videoEl);
+        attachedVideo = null;
+      }
+      if (attachedAudio) {
+        attachedAudio.detach(videoEl);
+        attachedAudio = null;
+      }
       setSharerName('');
+      setRemoteAudioBlocked(false);
       setHasVideo(false);
     };
 
@@ -78,14 +129,17 @@ export function ScreenStage() {
 
     // LiveKit events for track changes
     const onTrackSubscribed = (track: Track) => {
-      if (track.source === Track.Source.ScreenShare && videoEl) {
-        track.attach(videoEl);
-        attachedTrack = track;
-        setHasVideo(true);
+      if (track.source === Track.Source.ScreenShare || track.source === Track.Source.ScreenShareAudio) {
+        attachSharer();
       }
     };
     const onTrackUnsubscribed = (track: Track) => {
-      if (track === attachedTrack) {
+      if (
+        track === attachedVideo ||
+        track === attachedAudio ||
+        track.source === Track.Source.ScreenShare ||
+        track.source === Track.Source.ScreenShareAudio
+      ) {
         attachSharer();
       }
     };
@@ -100,11 +154,10 @@ export function ScreenStage() {
       room.off('trackUnsubscribed', onTrackUnsubscribed);
       room.off('localTrackPublished', attachSharer);
       room.off('localTrackUnpublished', attachSharer);
-      if (attachedTrack && videoEl) {
-        attachedTrack.detach(videoEl);
-      }
+      if (attachedVideo && videoEl) attachedVideo.detach(videoEl);
+      if (attachedAudio && videoEl) attachedAudio.detach(videoEl);
     };
-  }, [localSharing]);
+  }, [localSharing, videoElState]);
 
   const fullscreen = useRoom((s) => s.ui.fullscreen);
   const toggleFullscreen = () => {
@@ -143,16 +196,41 @@ export function ScreenStage() {
       {/* Ambient Glow behind video */}
       <AmbientGlow videoEl={videoElState} active={hasVideo} />
 
-      {/* Actual video element — kept rendered (opacity-0 when idle) so adaptiveStream never locks into 0x0 low-res */}
+      {/* Actual video element — attaches both video & audio on viewers for hardware A/V sync */}
       <video
         ref={setVideoNode}
         playsInline
         autoPlay
-        muted // Muted locally so presenter hears their original or remote audio through WebAudio gain node
+        onClick={() => {
+          if (videoRef.current && remoteAudioBlocked && !localSharing) {
+            videoRef.current.muted = false;
+            videoRef.current.volume = Math.max(0, Math.min(1, streamVolume * duck)) || 1;
+            void videoRef.current.play().catch(() => {});
+            setRemoteAudioBlocked(false);
+            void controller.unlockAudio();
+          }
+        }}
         className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${
           !hasVideo ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
         }`}
       />
+
+      {hasVideo && !localSharing && remoteAudioBlocked && (
+        <button
+          onClick={() => {
+            if (videoRef.current) {
+              videoRef.current.muted = false;
+              videoRef.current.volume = Math.max(0, Math.min(1, streamVolume * duck)) || 1;
+              void videoRef.current.play().catch(() => {});
+            }
+            setRemoteAudioBlocked(false);
+            void controller.unlockAudio();
+          }}
+          className="absolute top-14 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full bg-coral-500 hover:bg-coral-600 px-5 py-2.5 text-xs font-bold text-white shadow-2xl backdrop-blur animate-bounce"
+        >
+          <Volume2 className="h-4 w-4" /> Tap to Enable Screen Sound
+        </button>
+      )}
 
       {/* Screen Sharer Pill */}
       {hasVideo && sharerName && (

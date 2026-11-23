@@ -73,8 +73,17 @@ export function LocalStage() {
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
   const [remoteSharerName, setRemoteSharerName] = useState('');
   const [preferLocalFile, setPreferLocalFile] = useState(false);
+  const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
 
-  // If guest has not picked a local file, automatically watch the host's live local-movie stream track
+  // Sync remote <video> volume cleanly with Mixer Stream Volume & Smart Duck
+  useEffect(() => {
+    const el = remoteVideoRef.current;
+    if (!el || localMovie.url) return;
+    const targetVol = Math.max(0, Math.min(1, streamVolume * duck));
+    el.volume = targetVol;
+  }, [streamVolume, duck, localMovie.url, hasRemoteStream]);
+
+  // Attach BOTH remote video & remote audio onto ONE <video> element for hardware A/V lip-sync
   useEffect(() => {
     const room = controller.room;
     if (!room || localMovie.url) {
@@ -82,38 +91,69 @@ export function LocalStage() {
       return;
     }
 
-    let attachedTrack: Track | null = null;
+    let attachedVideo: Track | null = null;
+    let attachedAudio: Track | null = null;
     const videoEl = remoteVideoRef.current;
 
     const attachRemote = () => {
+      if (!videoEl) return;
       for (const p of room.remoteParticipants.values()) {
-        const pub = p.getTrackPublication(Track.Source.ScreenShare);
-        if (pub?.track && videoEl) {
-          if (attachedTrack !== pub.track) {
-            if (attachedTrack) attachedTrack.detach(videoEl);
-            attachedTrack = pub.track;
-            pub.track.attach(videoEl);
-            void videoEl.play().catch(() => {});
+        const vPub = p.getTrackPublication(Track.Source.ScreenShare);
+        const aPub = p.getTrackPublication(Track.Source.ScreenShareAudio);
+        if (vPub?.track) {
+          if (attachedVideo !== vPub.track) {
+            if (attachedVideo) attachedVideo.detach(videoEl);
+            attachedVideo = vPub.track;
+            vPub.track.attach(videoEl);
           }
+          if (aPub?.track && attachedAudio !== aPub.track) {
+            if (attachedAudio) attachedAudio.detach(videoEl);
+            attachedAudio = aPub.track;
+            videoEl.muted = false;
+            videoEl.volume = Math.max(0, Math.min(1, useRoom.getState().audio.streamVolume * useRoom.getState().duck));
+            aPub.track.attach(videoEl);
+          }
+          void videoEl.play().catch((err) => {
+            if (err?.name === 'NotAllowedError') {
+              videoEl.muted = true;
+              setRemoteAudioBlocked(true);
+              void videoEl.play().catch(() => {});
+            }
+          });
+          setRemoteAudioBlocked(Boolean(aPub?.track && videoEl.muted));
           setRemoteSharerName(p.name || 'Host');
           setHasRemoteStream(true);
           return;
         }
       }
-      if (attachedTrack && videoEl) {
-        attachedTrack.detach(videoEl);
-        attachedTrack = null;
+      if (attachedVideo) {
+        attachedVideo.detach(videoEl);
+        attachedVideo = null;
+      }
+      if (attachedAudio) {
+        attachedAudio.detach(videoEl);
+        attachedAudio = null;
       }
       setRemoteSharerName('');
       setHasRemoteStream(false);
+      setRemoteAudioBlocked(false);
     };
 
     attachRemote();
     const onSub = (track: Track) => {
-      if (track.source === Track.Source.ScreenShare) attachRemote();
+      if (track.source === Track.Source.ScreenShare || track.source === Track.Source.ScreenShareAudio) {
+        attachRemote();
+      }
     };
     const onUnsub = (track: Track) => {
-      if (track === attachedTrack || track.source === Track.Source.ScreenShare) attachRemote();
+      if (
+        track === attachedVideo ||
+        track === attachedAudio ||
+        track.source === Track.Source.ScreenShare ||
+        track.source === Track.Source.ScreenShareAudio
+      ) {
+        attachRemote();
+      }
     };
 
     room.on('trackSubscribed', onSub);
@@ -126,11 +166,20 @@ export function LocalStage() {
       room.off('trackUnsubscribed', onUnsub);
       room.off('trackPublished', attachRemote);
       room.off('trackUnpublished', attachRemote);
-      if (attachedTrack && videoEl) {
-        attachedTrack.detach(videoEl);
-      }
+      if (attachedVideo && videoEl) attachedVideo.detach(videoEl);
+      if (attachedAudio && videoEl) attachedAudio.detach(videoEl);
     };
   }, [localMovie.url, remoteVideoEl]);
+
+  const unmuteRemoteStream = useCallback(() => {
+    const el = remoteVideoRef.current;
+    if (!el) return;
+    el.muted = false;
+    el.volume = Math.max(0, Math.min(1, streamVolume * duck)) || 1;
+    void el.play().catch(() => {});
+    setRemoteAudioBlocked(false);
+    void controller.unlockAudio();
+  }, [streamVolume, duck]);
 
   // Stop captured stream when leaving local player cleanly
   useEffect(() => {
@@ -547,18 +596,30 @@ export function LocalStage() {
       {/* Case 1: No local file loaded yet -> Auto-play Host's live movie stream if available, or show Drop UI */}
       {!localMovie.url ? (
         <div className="relative flex h-full w-full items-center justify-center">
-          {/* Remote live stream <video> (kept mounted so adaptiveStream attaches instantaneously) */}
+          {/* Remote live stream <video> (attaches both video & audio onto ONE element for exact hardware A/V sync) */}
           <video
             ref={setRemoteVideoNode}
             playsInline
             autoPlay
-            muted // Audio plays cleanly through LiveKit ScreenShareAudio element scaled by Mixer
-            onClick={() => void controller.unlockAudio()}
+            onClick={() => unmuteRemoteStream()}
             onDoubleClick={() => void toggleRoomFullscreen()}
             className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${
               !hasRemoteStream || preferLocalFile ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
             }`}
           />
+
+          {/* Tap-to-unmute pill when phone/browser autoplay muted the audio track */}
+          {hasRemoteStream && !preferLocalFile && remoteAudioBlocked && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                unmuteRemoteStream();
+              }}
+              className="absolute top-14 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full bg-coral-500 hover:bg-coral-600 px-5 py-2.5 text-xs font-bold text-white shadow-2xl backdrop-blur animate-bounce"
+            >
+              <Volume2 className="h-4 w-4" /> Tap to Enable Movie Sound
+            </button>
+          )}
 
           {/* Live stream HUD overlays for Guests */}
           {hasRemoteStream && !preferLocalFile && (
