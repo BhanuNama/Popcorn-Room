@@ -4,42 +4,45 @@
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Plus Jakarta Sans', 'Inter', ui-sans-serif, system-ui, sans-serif;
 
-  /* Brand: navy ink + coral pink accent + periwinkle (from the design inspiration) */
-  --color-ink-50: #f4f5fb;
-  --color-ink-100: #e6e8f5;
-  --color-ink-200: #c9cdea;
-  --color-ink-300: #9aa0cf;
-  --color-ink-400: #6b72ab;
-  --color-ink-500: #474e8a;
-  --color-ink-600: #333970;
-  --color-ink-700: #262b5c;
-  --color-ink-800: #1c1f4a;
-  --color-ink-900: #131535;
-  --color-ink-950: #0c0b16;
+  /* Brand: lightweight slate-ink + crisp indigo-sky accent + warm amber-gold highlights (zero pink) */
+  --color-ink-50: #f8fafc;
+  --color-ink-100: #f1f5f9;
+  --color-ink-200: #e2e8f0;
+  --color-ink-300: #94a3b8;
+  --color-ink-400: #64748b;
+  --color-ink-500: #475569;
+  --color-ink-600: #334155;
+  --color-ink-700: #1e293b;
+  --color-ink-800: #0f172a;
+  --color-ink-900: #0b1120;
+  --color-ink-950: #060913;
 
-  --color-coral-300: #ffa3bd;
-  --color-coral-400: #ff7da1;
-  --color-coral-500: #ff5c8a;
-  --color-coral-600: #e8437a;
-  --color-coral-700: #c22f62;
+  /* Primary interactive accent (remapped from coral/pink -> crisp indigo-azure / theme-reactive) */
+  --color-coral-300: #a5b4fc;
+  --color-coral-400: #818cf8;
+  --color-coral-500: #6366f1;
+  --color-coral-600: #4f46e5;
+  --color-coral-700: #4338ca;
 
-  --color-peri-200: #d9e0fd;
-  --color-peri-300: #c3cffb;
-  --color-peri-400: #a6b6f7;
-  --color-peri-500: #8b7bff;
+  /* Secondary soft sky-cyan / periwinkle accent */
+  --color-peri-200: #bae6fd;
+  --color-peri-300: #7dd3fc;
+  --color-peri-400: #38bdf8;
+  --color-peri-500: #0ea5e9;
 
-  --color-blush-100: #fde8f1;
-  --color-blush-200: #fbd5e5;
+  /* Soft ice-mist highlight (replaces blush pink) */
+  --color-blush-100: #eef2ff;
+  --color-blush-200: #e0e7ff;
 
-  --color-stage: var(--theme-bg, #07060d);
-  --color-surface: var(--theme-surface, #12111f);
-  --color-popcorn-primary: var(--theme-accent, #ff5c8a);
+  --color-stage: var(--theme-bg, #070a12);
+  --color-surface: var(--theme-surface, #0e1422);
+  --color-popcorn-primary: var(--theme-accent, #6366f1);
 
   --radius-4xl: 2rem;
 
-  --shadow-card: 0 1px 2px rgb(28 31 74 / 0.06), 0 12px 32px -12px rgb(28 31 74 / 0.18);
-  --shadow-float: 0 24px 60px -20px rgb(28 31 74 / 0.35);
-  --shadow-glow: 0 0 0 1px rgb(255 92 138 / 0.4), 0 0 24px rgb(255 92 138 / 0.35);
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 12px 32px -12px rgb(15 23 42 / 0.12);
+  --shadow-float: 0 24px 60px -20px rgb(6 9 19 / 0.45);
+  --shadow-glow: 0 0 0 1px rgb(99 102 241 / 0.35), 0 0 22px rgb(99 102 241 / 0.25);
 
   --animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
   --animate-shimmer: shimmer 1.6s linear infinite;
@@ -66,6 +69,34 @@
   }
 }
 
+@keyframes orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes orbit-spin-rev {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes float-gentle {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
 @layer base {
   html,
   body,
@@ -73,15 +104,17 @@
     height: 100%;
   }
   body {
-    @apply font-sans antialiased text-ink-800;
+    @apply font-sans antialiased text-ink-800 bg-ink-50;
     -webkit-tap-highlight-color: transparent;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
   :focus-visible {
-    outline: 2px solid var(--color-coral-500);
+    outline: 2px solid var(--theme-accent, var(--color-coral-500));
     outline-offset: 2px;
   }
   button {
     cursor: pointer;
+    touch-action: manipulation;
   }
   button:disabled {
     cursor: not-allowed;
@@ -89,124 +122,158 @@
 }
 
 @layer components {
-  /* Light marketing surfaces */
+  /* Light airy editorial surface for Landing & Join screens (zero heavy pink) */
   .bg-pastel {
     background:
-      radial-gradient(1200px 600px at 50% -10%, rgb(255 255 255 / 0.55), transparent 60%),
-      linear-gradient(180deg, #c3cffb 0%, #d9dcfb 38%, #f3d9ea 72%, #fbd5e5 100%);
+      radial-gradient(1100px 550px at 50% -8%, rgb(255 255 255 / 0.9), transparent 65%),
+      radial-gradient(700px 500px at 85% 18%, rgb(199 210 254 / 0.42), transparent 60%),
+      radial-gradient(700px 500px at 12% 24%, rgb(254 243 199 / 0.45), transparent 60%),
+      linear-gradient(180deg, #f8fafc 0%, #f1f5f9 55%, #eef2ff 100%);
   }
   .dot-grid {
-    background-image: radial-gradient(rgb(28 31 74 / 0.12) 1px, transparent 1px);
-    background-size: 22px 22px;
+    background-image: radial-gradient(rgb(15 23 42 / 0.08) 1px, transparent 1px);
+    background-size: 24px 24px;
   }
   .card {
-    @apply rounded-3xl bg-white shadow-card ring-1 ring-ink-800/5;
+    @apply rounded-3xl bg-white/95 backdrop-blur-md shadow-card ring-1 ring-ink-800/[0.06];
   }
 
   /* Dark cinematic room surfaces */
   .glass {
-    @apply bg-white/[0.045] ring-1 ring-white/[0.08] backdrop-blur-xl;
+    @apply bg-white/[0.04] ring-1 ring-white/[0.08] backdrop-blur-xl;
   }
   .glass-strong {
-    @apply bg-[#16152a]/80 ring-1 ring-white/10 backdrop-blur-2xl;
+    @apply bg-[#0e1422]/85 ring-1 ring-white/[0.09] backdrop-blur-2xl;
+  }
+
+  /* Ensure YouTube iframe always fills its stage container cleanly */
+  .yt-frame iframe {
+    width: 100% !important;
+    height: 100% !important;
+    border: 0;
+  }
+
+  /* Buttery interactive pill/button feel */
+  .butter-btn {
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background-color 180ms ease, box-shadow 180ms ease, opacity 150ms ease;
+  }
+  .butter-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+  .butter-btn:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+
+  .animate-orbit-slow {
+    animation: orbit-spin 42s linear infinite;
+  }
+  .animate-orbit-med {
+    animation: orbit-spin 26s linear infinite;
+  }
+  .animate-orbit-rev {
+    animation: orbit-spin-rev 34s linear infinite;
+  }
+  .animate-float-gentle {
+    animation: float-gentle 5.5s ease-in-out infinite;
   }
 
   /* ------------------------------------------------------------- */
-  /*  Authentic Cinema Themes (clean, purposeful, zero gradient mud) */
+  /*  Authentic Cinema Themes (clean, lightweight, theme-reactive)  */
   /* ------------------------------------------------------------- */
   :root,
   [data-theme="midnight"] {
-    --theme-bg: #07090e;
-    --theme-surface: #0e131f;
-    --theme-glass: rgba(14, 19, 31, 0.88);
+    --theme-bg: #070a12;
+    --theme-surface: rgba(14, 20, 34, 0.86);
+    --theme-glass: rgba(15, 22, 38, 0.72);
     --theme-border: rgba(255, 255, 255, 0.09);
-    --theme-accent: #ff5c8a;
+    --theme-accent: #818cf8;
+    --color-coral-400: #818cf8;
+    --color-coral-500: #6366f1;
+    --color-coral-600: #4f46e5;
   }
 
   [data-theme="oled"] {
     --theme-bg: #000000;
-    --theme-surface: #040404;
-    --theme-glass: rgba(4, 4, 4, 0.98);
-    --theme-border: rgba(255, 255, 255, 0.14);
-    --theme-accent: #ffffff;
+    --theme-surface: rgba(7, 7, 9, 0.96);
+    --theme-glass: rgba(5, 5, 7, 0.94);
+    --theme-border: rgba(255, 255, 255, 0.12);
+    --theme-accent: #e2e8f0;
+    --color-coral-400: #f1f5f9;
+    --color-coral-500: #475569;
+    --color-coral-600: #334155;
   }
 
   [data-theme="retro"] {
-    --theme-bg: #160f08;
-    --theme-surface: #24160b;
-    --theme-glass: rgba(36, 22, 11, 0.9);
-    --theme-border: rgba(245, 158, 11, 0.35);
+    --theme-bg: #140e08;
+    --theme-surface: rgba(34, 22, 11, 0.9);
+    --theme-glass: rgba(36, 22, 11, 0.8);
+    --theme-border: rgba(245, 158, 11, 0.28);
     --theme-accent: #f59e0b;
+    --color-coral-400: #fbbf24;
+    --color-coral-500: #f59e0b;
+    --color-coral-600: #d97706;
   }
 
   [data-theme="cyberpunk"] {
-    --theme-bg: #040714;
-    --theme-surface: #08122a;
-    --theme-glass: rgba(8, 18, 42, 0.9);
-    --theme-border: rgba(6, 182, 212, 0.4);
-    --theme-accent: #06b6d4;
+    --theme-bg: #040814;
+    --theme-surface: rgba(8, 18, 42, 0.9);
+    --theme-glass: rgba(8, 18, 42, 0.78);
+    --theme-border: rgba(56, 189, 248, 0.32);
+    --theme-accent: #38bdf8;
+    --color-coral-400: #38bdf8;
+    --color-coral-500: #0ea5e9;
+    --color-coral-600: #0284c7;
   }
 
   [data-theme="nordic"] {
-    --theme-bg: #05120c;
-    --theme-surface: #0a2016;
-    --theme-glass: rgba(10, 32, 22, 0.9);
-    --theme-border: rgba(16, 185, 129, 0.35);
-    --theme-accent: #10b981;
+    --theme-bg: #05110c;
+    --theme-surface: rgba(10, 30, 22, 0.9);
+    --theme-glass: rgba(10, 30, 22, 0.78);
+    --theme-border: rgba(16, 185, 129, 0.28);
+    --theme-accent: #34d399;
+    --color-coral-400: #34d399;
+    --color-coral-500: #10b981;
+    --color-coral-600: #059669;
   }
 
   [data-theme="sunset"] {
-    --theme-bg: #140718;
-    --theme-surface: #240c2b;
-    --theme-glass: rgba(36, 12, 43, 0.9);
-    --theme-border: rgba(244, 63, 94, 0.35);
-    --theme-accent: #f43f5e;
+    --theme-bg: #110b18;
+    --theme-surface: rgba(28, 17, 41, 0.9);
+    --theme-glass: rgba(28, 17, 41, 0.78);
+    --theme-border: rgba(251, 146, 60, 0.28);
+    --theme-accent: #fb923c;
+    --color-coral-400: #fb923c;
+    --color-coral-500: #f97316;
+    --color-coral-600: #ea580c;
   }
 
-  /* Live theme application across viewport and all room components */
+  /* Live theme application across viewport and room components */
   html[data-theme],
   body[data-theme] {
-    background-color: var(--theme-bg) !important;
-    transition: background-color 0.3s ease;
+    background-color: var(--theme-bg);
+    transition: background-color 0.35s ease;
   }
 
   [data-theme] #room-stage-root {
-    background-color: var(--theme-bg) !important;
-    transition: background-color 0.3s ease;
+    background-color: var(--theme-bg);
+    transition: background-color 0.35s ease;
   }
 
   [data-theme] .glass {
-    background-color: var(--theme-glass) !important;
-    border-color: var(--theme-border) !important;
-    transition: background-color 0.3s ease, border-color 0.3s ease;
+    background-color: var(--theme-glass);
+    border-color: var(--theme-border);
+    transition: background-color 0.35s ease, border-color 0.35s ease;
   }
 
   [data-theme] .glass-strong {
-    background-color: var(--theme-surface) !important;
-    border-color: var(--theme-border) !important;
-    transition: background-color 0.3s ease, border-color 0.3s ease;
-  }
-
-  [data-theme] aside {
-    background-color: var(--theme-surface) !important;
-    border-color: var(--theme-border) !important;
-    transition: background-color 0.3s ease, border-color 0.3s ease;
-  }
-
-  [data-theme] nav {
-    background-color: var(--theme-surface) !important;
-    border-color: var(--theme-border) !important;
-    transition: background-color 0.3s ease, border-color 0.3s ease;
-  }
-
-  [data-theme] header {
-    background: linear-gradient(180deg, var(--theme-surface) 0%, transparent 100%) !important;
-    transition: background 0.3s ease;
+    background-color: var(--theme-surface);
+    border-color: var(--theme-border);
+    transition: background-color 0.35s ease, border-color 0.35s ease;
   }
 
   /* Subtitle Cues Styling */
   video::cue {
-    background-color: rgba(0, 0, 0, 0.85);
+    background-color: rgba(6, 9, 19, 0.85);
     color: #ffffff;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     font-weight: 600;
@@ -230,10 +297,10 @@
   }
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgb(255 255 255 / 0.15) transparent;
+    scrollbar-color: rgb(255 255 255 / 0.16) transparent;
   }
   .text-gradient {
-    background: linear-gradient(90deg, #8b7bff, #ff5c8a);
+    background: linear-gradient(120deg, #4f46e5 0%, #0ea5e9 55%, #f59e0b 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -256,11 +323,4 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
-}
-
-/* Range-free slider styling handled by Radix; hide YouTube iframe pointer events (we use our own controls). */
-.yt-frame iframe {
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
 }

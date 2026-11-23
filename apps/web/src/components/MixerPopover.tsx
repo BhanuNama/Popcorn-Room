@@ -23,25 +23,16 @@ export function MixerPopover() {
         if (!navigator.mediaDevices?.enumerateDevices) return;
         let all = await navigator.mediaDevices.enumerateDevices();
         let inputs = all.filter((d) => d.kind === 'audioinput');
-
-        // If labels are blank, probe to unlock
-        if (inputs.length > 0 && !inputs[0].label) {
-          try {
-            const temp = await navigator.mediaDevices.getUserMedia({ audio: true });
-            temp.getTracks().forEach((t) => t.stop());
-            all = await navigator.mediaDevices.enumerateDevices();
-            inputs = all.filter((d) => d.kind === 'audioinput');
-          } catch {}
-        }
         setDevices(inputs);
 
-        // Auto-select laptop array mic if bluetooth headset is detected and no device chosen yet
+        // Auto-select clean internal/wired microphone if labels are already available
         const currentSelected = useRoom.getState().audio.micDeviceId;
-        if (!currentSelected && inputs.length > 0) {
+        if (!currentSelected && inputs.some((i) => !!i.label)) {
           const internalMic = inputs.find(
             (d) =>
-              /array|realtek|built-in|internal|intel|integrated|conexant|synaptics/i.test(d.label) &&
-              !/headset|bluetooth|buds|airpods|hands-free|handsfree|bose|sony|boat|realme|oneplus|jbl/i.test(d.label),
+              d.deviceId !== 'communications' &&
+              !isHeadset(d.label) &&
+              /array|realtek|built-in|internal|intel|amd|integrated|conexant|synaptics|macbook/i.test(d.label),
           );
           if (internalMic && internalMic.deviceId) {
             useRoom.getState().setAudio({ micDeviceId: internalMic.deviceId });

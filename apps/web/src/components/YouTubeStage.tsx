@@ -1,12 +1,24 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Play, Pause, Volume2, VolumeX, Maximize, Minimize, RotateCcw, AlertCircle } from 'lucide-react';
+import {
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Maximize,
+  Minimize,
+  RotateCcw,
+  AlertCircle,
+  ExternalLink,
+} from 'lucide-react';
 import { decideDrift, expectedPosition, formatTime, msUntilStart } from '@popcorn/shared';
 import { clock } from '@/lib/clock';
+import { api } from '@/lib/api';
 import { controller } from '@/room/controller';
 import { canControl, useRoom } from '@/store/room';
 import { Slider } from './ui';
 import { toggleRoomFullscreen } from '@/lib/fullscreen';
+import { AmbientGlow } from './AmbientGlow';
 
 declare global {
   interface Window {
@@ -27,8 +39,15 @@ function loadYouTubeApi(cb: () => void) {
   if (ytApiLoading) return;
   ytApiLoading = true;
 
+  const existing = document.querySelector('script[src*="youtube.com/iframe_api"]');
+  if (existing && window.YT?.Player) {
+    while (ytReadyCallbacks.length) ytReadyCallbacks.shift()?.();
+    return;
+  }
+
   const tag = document.createElement('script');
   tag.src = 'https://www.youtube.com/iframe_api';
+  tag.async = true;
   window.onYouTubeIframeAPIReady = () => {
     while (ytReadyCallbacks.length) {
       ytReadyCallbacks.shift()?.();
@@ -41,12 +60,15 @@ export function YouTubeStage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<YT.Player | null>(null);
   const driftTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadedVideoRef = useRef<string | null>(null);
+  const autoplayCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sync = useRoom((s) => s.sync);
   const streamVolume = useRoom((s) => s.audio.streamVolume);
   const duck = useRoom((s) => s.duck);
   const smartDuck = useRoom((s) => s.audio.smartDuck);
   const peopleCount = useRoom((s) => s.people.length);
+  const ytTitle = useRoom((s) => s.ytTitle);
   const isController = useRoom(canControl);
   const waitingFor = useRoom((s) => s.waitingFor);
   const countdownAt = useRoom((s) => s.countdownAt);
@@ -54,26 +76,45 @@ export function YouTubeStage() {
 
   const [ready, setReady] = useState(false);
   const [localMuted, setLocalMuted] = useState(false);
+  const [autoplayMuted, setAutoplayMuted] = useState(false);
+  const [embedError, setEmbedError] = useState<string | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideControlsTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [localTime, setLocalTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [countdownNum, setCountdownNum] = useState<number | null>(null);
 
+  // Fetch video title cleanly via API client (supports Vercel -> Render cross-origin VITE_API_URL)
+  const fetchTitle = useCallback((videoId: string) => {
+    useRoom.setState({ ytTitle: 'Loading title...' });
+    api
+      .oembed(videoId)
+      .then((data) => {
+        if (data?.title) useRoom.setState({ ytTitle: data.title });
+      })
+      .catch(() => {
+        useRoom.setState({ ytTitle: 'YouTube Video' });
+      });
+  }, []);
+
   // Sync volume with user's stream volume slider and ducking factor
   const lastVolRef = useRef<number>(-1);
   useEffect(() => {
     const p = playerRef.current;
     if (!p || !ready || typeof p.setVolume !== 'function') return;
-    // Ducking only applies if smartDuck is explicitly enabled by the user in the mixer.
-    // When enabled, step smoothly to 70% level to avoid hammering setVolume() 25x/sec.
+    if (autoplayMuted) return;
     const effectiveDuck = smartDuck ? (duck < 0.95 ? 0.7 : 1) : 1;
     const vol = localMuted ? 0 : Math.round(streamVolume * effectiveDuck * 100);
+    if (localMuted && typeof p.mute === 'function') {
+      p.mute();
+    } else if (!localMuted && typeof p.unMute === 'function') {
+      p.unMute();
+    }
     if (Math.abs(vol - lastVolRef.current) >= 2) {
       lastVolRef.current = vol;
       p.setVolume(vol);
     }
-  }, [streamVolume, duck, smartDuck, localMuted, ready]);
+  }, [streamVolume, duck, smartDuck, localMuted, autoplayMuted, ready]);
 
   // Countdown timer calculation
   useEffect(() => {
@@ -100,20 +141,31 @@ export function YouTubeStage() {
   // Initialize YT Player
   useEffect(() => {
     let unmounted = false;
+    const initialVideoId = useRoom.getState().sync.videoId || undefined;
+    const initialPos = expectedPosition(useRoom.getState().sync, clock.offsetMs);
 
     loadYouTubeApi(() => {
       if (unmounted || !containerRef.current || playerRef.current) return;
 
       const playerDiv = document.createElement('div');
+      playerDiv.style.width = '100%';
+      playerDiv.style.height = '100%';
       containerRef.current.appendChild(playerDiv);
+
+      if (initialVideoId) {
+        loadedVideoRef.current = initialVideoId;
+        fetchTitle(initialVideoId);
+      }
 
       const p = new window.YT!.Player(playerDiv, {
         height: '100%',
         width: '100%',
-        videoId: sync.videoId || undefined,
+        videoId: initialVideoId,
         playerVars: {
-          autoplay: 1,
-          controls: 0, // Custom controls to maintain cinematic UI and prevent unsynced manual seeks
+          autoplay: useRoom.getState().sync.status === 'playing' ? 1 : 0,
+          start: Math.floor(initialPos),
+          playsinline: 1,
+          controls: 0,
           disablekb: 1,
           fs: 0,
           rel: 0,
@@ -121,16 +173,18 @@ export function YouTubeStage() {
           iv_load_policy: 3,
           enablejsapi: 1,
           origin: window.location.origin,
-        },
+        } as YT.PlayerVars,
         events: {
           onReady: () => {
             if (unmounted) return;
             playerRef.current = p;
             setReady(true);
+            setEmbedError(null);
             const vol = Math.round(useRoom.getState().audio.streamVolume * 100);
-            p.setVolume(vol);
+            try {
+              p.setVolume(vol);
+            } catch {}
 
-            // Register bridge on controller so chat timestamps and session recap know playhead
             controller.yt = {
               getTime: () => {
                 try {
@@ -151,7 +205,10 @@ export function YouTubeStage() {
           onStateChange: (e) => {
             if (unmounted) return;
             const state = e.data;
-            if (state === window.YT!.PlayerState.BUFFERING) {
+            if (state === window.YT!.PlayerState.PLAYING) {
+              setEmbedError(null);
+              controller.setLocalBuffering(false);
+            } else if (state === window.YT!.PlayerState.BUFFERING) {
               controller.setLocalBuffering(true);
             } else {
               controller.setLocalBuffering(false);
@@ -161,8 +218,16 @@ export function YouTubeStage() {
               controller.onVideoEnded();
             }
           },
-          onError: () => {
+          onError: (e) => {
             controller.setLocalBuffering(false);
+            const code = e?.data;
+            if (code === 101 || code === 150) {
+              setEmbedError('The video owner disabled embedded playback outside youtube.com.');
+            } else if (code === 100) {
+              setEmbedError('This video is private or unavailable.');
+            } else if (code === 2 || code === 5) {
+              setEmbedError('Could not load this YouTube video in the browser.');
+            }
           },
         },
       });
@@ -172,6 +237,7 @@ export function YouTubeStage() {
       unmounted = true;
       controller.yt = null;
       if (driftTimerRef.current) clearInterval(driftTimerRef.current);
+      if (autoplayCheckRef.current) clearTimeout(autoplayCheckRef.current);
       if (playerRef.current) {
         try {
           playerRef.current.destroy();
@@ -181,34 +247,26 @@ export function YouTubeStage() {
         playerRef.current = null;
       }
     };
-  }, []);
+  }, [fetchTitle]);
 
-  // React to sync state changes (video ID changed)
-  const currentVideoId = useRef<string | null>(null);
+  // React to sync state changes (when video ID changes after player is mounted)
   useEffect(() => {
     const p = playerRef.current;
     if (!p || !ready || !sync.videoId) return;
 
-    if (currentVideoId.current !== sync.videoId) {
-      currentVideoId.current = sync.videoId;
+    if (loadedVideoRef.current !== sync.videoId) {
+      loadedVideoRef.current = sync.videoId;
+      setEmbedError(null);
+      setAutoplayMuted(false);
       p.loadVideoById({
         videoId: sync.videoId,
-        startSeconds: sync.position || 0,
+        startSeconds: expectedPosition(sync, clock.offsetMs) || 0,
       });
-      // Fetch oembed for room display
-      useRoom.setState({ ytTitle: 'Loading title...' });
-      fetch(`/api/oembed?id=${sync.videoId}`)
-        .then((r) => r.json())
-        .then((data: { title?: string }) => {
-          if (data.title) useRoom.setState({ ytTitle: data.title });
-        })
-        .catch(() => {
-          useRoom.setState({ ytTitle: 'YouTube Video' });
-        });
+      fetchTitle(sync.videoId);
     }
-  }, [sync.videoId, ready]);
+  }, [sync.videoId, ready, fetchTitle, sync]);
 
-  // Section 6: Drift correction loop every 2 seconds
+  // Drift correction & mobile autoplay recovery loop
   useEffect(() => {
     const p = playerRef.current;
     if (!p || !ready || !sync.videoId) return;
@@ -218,6 +276,7 @@ export function YouTubeStage() {
         const playerTime = p.getCurrentTime() || 0;
         const playerRate = p.getPlaybackRate() || 1;
         const dur = p.getDuration() || 0;
+        const st = p.getPlayerState();
         setLocalTime(playerTime);
         setDuration(dur);
         useRoom.setState({
@@ -226,8 +285,7 @@ export function YouTubeStage() {
 
         const until = msUntilStart(sync, clock.offsetMs);
         if (until > 0) {
-          // Scheduled countdown in progress; pause or seek to start
-          if (p.getPlayerState() === window.YT!.PlayerState.PLAYING) {
+          if (st === window.YT!.PlayerState.PLAYING) {
             p.pauseVideo();
           }
           if (Math.abs(playerTime - sync.position) > 0.5) {
@@ -237,7 +295,7 @@ export function YouTubeStage() {
         }
 
         if (sync.status === 'paused') {
-          if (p.getPlayerState() === window.YT!.PlayerState.PLAYING) {
+          if (st === window.YT!.PlayerState.PLAYING) {
             p.pauseVideo();
           }
           if (Math.abs(playerTime - sync.position) > 0.4) {
@@ -247,18 +305,35 @@ export function YouTubeStage() {
         }
 
         if (sync.status === 'playing') {
-          if (p.getPlayerState() !== window.YT!.PlayerState.PLAYING) {
+          if (st !== window.YT!.PlayerState.PLAYING && st !== window.YT!.PlayerState.BUFFERING) {
             p.playVideo();
+
+            // Check after 900ms if mobile/desktop autoplay policy blocked unmuted playback
+            if (!autoplayCheckRef.current) {
+              autoplayCheckRef.current = setTimeout(() => {
+                autoplayCheckRef.current = null;
+                try {
+                  const cur = p.getPlayerState();
+                  if (
+                    useRoom.getState().sync.status === 'playing' &&
+                    cur !== window.YT!.PlayerState.PLAYING &&
+                    cur !== window.YT!.PlayerState.BUFFERING
+                  ) {
+                    p.mute();
+                    p.playVideo();
+                    setAutoplayMuted(true);
+                  }
+                } catch {
+                  // ignore
+                }
+              }, 900);
+            }
           }
 
-          // Decide drift based on NTP clock offset
           const action = decideDrift(playerTime, playerRate, sync, clock.offsetMs);
           if (action.kind === 'seek') {
             p.seekTo(action.to, true);
           } else if (action.kind === 'rate') {
-            // NOTE: YouTube iframe API audio engine distorts when setPlaybackRate() is called with arbitrary
-            // fractional rates like 0.96/1.04. For video watching, if drift is moderate (> 1.8s), seek to target.
-            // If drift is minor (< 1.8s), keep standard 1.0x rate so audio stays 100% studio-clean without warbling.
             if (Math.abs(action.drift) > 1.8) {
               p.seekTo(expectedPosition(sync, clock.offsetMs), true);
             }
@@ -283,6 +358,21 @@ export function YouTubeStage() {
     };
   }, [sync, ready]);
 
+  const unmuteAutoplay = useCallback(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    try {
+      p.unMute();
+      const vol = Math.round(useRoom.getState().audio.streamVolume * 100) || 100;
+      p.setVolume(vol);
+      p.playVideo();
+      setLocalMuted(false);
+      setAutoplayMuted(false);
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Handle controls hover auto-fade
   const resetControlsTimeout = useCallback(() => {
     setControlsVisible(true);
@@ -296,10 +386,12 @@ export function YouTubeStage() {
 
   const handleSeek = (pos: number) => {
     if (!isController) return;
+    setLocalTime(pos);
     controller.seek(pos);
   };
 
   const togglePlay = () => {
+    if (autoplayMuted) unmuteAutoplay();
     if (!isController) return;
     if (sync.status === 'playing') {
       controller.pause();
@@ -310,25 +402,63 @@ export function YouTubeStage() {
 
   return (
     <div
-      className="group relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-black"
+      className="group relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl p-1 sm:p-3"
       onMouseMove={resetControlsTimeout}
       onMouseLeave={() => sync.status === 'playing' && setControlsVisible(false)}
       onClick={resetControlsTimeout}
     >
+      {/* Subtle cinema Ambilight backdrop synced with room theme */}
+      <AmbientGlow active={Boolean(sync.videoId)} softFallback />
+
       {/* Container where the YouTube iframe is attached */}
       <div
         ref={containerRef}
-        className="yt-frame pointer-events-none h-full w-full select-none"
+        className="yt-frame pointer-events-none relative z-10 h-full w-full select-none overflow-hidden rounded-xl bg-black shadow-2xl"
       />
 
-      {/* Floating local mute reminder */}
-      {localMuted && (
+      {/* Embed error card (for videos restricted from embeds by uploader) */}
+      {embedError && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/85 p-6 text-center backdrop-blur-md">
+          <div className="max-w-sm space-y-3 rounded-2xl glass-strong p-5 ring-1 ring-white/15">
+            <AlertCircle size={28} className="mx-auto text-amber-400" />
+            <h3 className="font-display text-base font-bold text-white">YouTube Embed Restricted</h3>
+            <p className="text-xs leading-relaxed text-white/70">{embedError}</p>
+            <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+              {sync.videoId && (
+                <a
+                  href={`https://www.youtube.com/watch?v=${sync.videoId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white hover:bg-white/20"
+                >
+                  <ExternalLink size={13} /> Open on YouTube
+                </a>
+              )}
+              {isController && (
+                <button
+                  onClick={() => useRoom.getState().setUi({ youtubeDialog: true })}
+                  className="rounded-xl bg-coral-500 px-3.5 py-2 text-xs font-semibold text-white hover:bg-coral-600"
+                >
+                  Pick Another Video
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Autoplay / Local mute prompt */}
+      {(localMuted || autoplayMuted) && !embedError && (
         <button
-          onClick={() => setLocalMuted(false)}
-          className="absolute top-4 left-4 z-20 flex items-center gap-1.5 rounded-full bg-red-500/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur transition hover:bg-red-500 hover:scale-105 active:scale-95"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (autoplayMuted) unmuteAutoplay();
+            else setLocalMuted(false);
+          }}
+          className="absolute top-6 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full bg-coral-500 px-4 py-2 text-xs font-bold text-white shadow-xl backdrop-blur animate-bounce transition hover:bg-coral-600 active:scale-95"
           title="Click to restore sound"
         >
-          <VolumeX size={14} /> Muted locally (Click to unmute)
+          <Volume2 size={14} /> Tap to Unmute YouTube Sound
         </button>
       )}
 
@@ -342,7 +472,7 @@ export function YouTubeStage() {
             key={countdownNum}
             className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm"
           >
-            <span className="font-display text-8xl font-black text-coral-500 drop-shadow-2xl">
+            <span className="font-display text-8xl font-black text-coral-400 drop-shadow-2xl">
               {countdownNum}
             </span>
             <span className="mt-4 text-base font-semibold text-white/90">
@@ -361,7 +491,7 @@ export function YouTubeStage() {
             exit={{ opacity: 0, y: -10 }}
             className="pointer-events-none absolute top-6 z-30 flex items-center gap-2.5 rounded-full bg-ink-950/85 px-4 py-2 text-xs font-medium text-white shadow-float ring-1 ring-white/10 backdrop-blur-md"
           >
-            <div className="h-2 w-2 animate-ping rounded-full bg-coral-500" />
+            <div className="h-2 w-2 animate-ping rounded-full bg-coral-400" />
             <span>Waiting for {waitingFor.join(', ')} to catch up...</span>
           </motion.div>
         )}
@@ -369,13 +499,13 @@ export function YouTubeStage() {
 
       {/* Custom Clean Overlay Controls */}
       <AnimatePresence>
-        {(controlsVisible || sync.status !== 'playing') && (
+        {(controlsVisible || sync.status !== 'playing') && !embedError && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="absolute inset-0 z-20 flex flex-col justify-between bg-gradient-to-t from-black/80 via-transparent to-black/40 p-4 transition-all sm:p-6"
+            className="absolute inset-0 z-20 flex flex-col justify-between bg-gradient-to-t from-black/85 via-transparent to-black/45 p-4 transition-all sm:p-6"
           >
             {/* Top Bar inside Video */}
             <div className="flex items-center justify-between text-white drop-shadow">
@@ -384,7 +514,7 @@ export function YouTubeStage() {
                   YouTube Sync
                 </span>
                 <span className="truncate text-sm font-semibold opacity-90">
-                  {useRoom.getState().ytTitle || 'YouTube Mode'}
+                  {ytTitle || 'YouTube Mode'}
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -399,7 +529,7 @@ export function YouTubeStage() {
             {/* Bottom Controls */}
             <div className="space-y-3">
               {/* Progress Slider */}
-              <div className="flex items-center gap-3 text-xs text-white/90">
+              <div className="flex items-center gap-3 text-xs text-white/90 tabular-nums">
                 <span>{formatTime(localTime)}</span>
                 <div className="flex-1">
                   <Slider
@@ -418,7 +548,7 @@ export function YouTubeStage() {
                   <button
                     onClick={togglePlay}
                     disabled={!isController}
-                    className="grid h-10 w-10 place-items-center rounded-xl bg-white text-ink-900 shadow-md transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"
+                    className="butter-btn grid h-10 w-10 place-items-center rounded-xl bg-white text-ink-900 shadow-md disabled:opacity-50"
                     title={
                       !isController
                         ? 'Host controls playback'
@@ -435,17 +565,20 @@ export function YouTubeStage() {
                   </button>
 
                   <button
-                    onClick={() => setLocalMuted(!localMuted)}
-                    className="grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-white backdrop-blur transition hover:bg-white/20"
-                    title={localMuted ? 'Unmute' : 'Mute'}
+                    onClick={() => {
+                      if (autoplayMuted) unmuteAutoplay();
+                      else setLocalMuted(!localMuted);
+                    }}
+                    className="butter-btn grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-white backdrop-blur hover:bg-white/20"
+                    title={localMuted || autoplayMuted ? 'Unmute' : 'Mute'}
                   >
-                    {localMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                    {localMuted || autoplayMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
                   </button>
 
                   {isController && (
                     <button
                       onClick={() => controller.startCountdown()}
-                      className="flex h-10 items-center gap-1.5 rounded-xl bg-white/10 px-3 text-xs font-semibold text-white backdrop-blur transition hover:bg-white/20"
+                      className="butter-btn flex h-10 items-center gap-1.5 rounded-xl bg-white/10 px-3 text-xs font-semibold text-white backdrop-blur hover:bg-white/20"
                       title="Ready check and 3-2-1 countdown"
                     >
                       <RotateCcw size={14} /> 3-2-1 Sync
@@ -453,9 +586,9 @@ export function YouTubeStage() {
                   )}
 
                   {peopleCount > 1 && (
-                    <div className="hidden sm:flex items-center gap-1.5 rounded-xl bg-amber-500/20 px-2.5 py-2 text-[11px] text-amber-200 ring-1 ring-amber-500/30">
+                    <div className="hidden md:flex items-center gap-1.5 rounded-xl bg-amber-500/15 px-2.5 py-2 text-[11px] text-amber-200 ring-1 ring-amber-500/25">
                       <AlertCircle size={13} className="shrink-0 text-amber-400" />
-                      <span>Testing on 1 laptop? Mute one tab to prevent speaker echo</span>
+                      <span>Testing 2 tabs on 1 laptop? Mute one tab to prevent speaker echo</span>
                     </div>
                   )}
                 </div>
@@ -470,7 +603,7 @@ export function YouTubeStage() {
 
                   <button
                     onClick={() => toggleRoomFullscreen()}
-                    className="grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-white backdrop-blur transition hover:bg-white/20"
+                    className="butter-btn grid h-10 w-10 place-items-center rounded-xl bg-white/10 text-white backdrop-blur hover:bg-white/20"
                     title={fullscreen ? 'Exit Fullscreen (Esc / F)' : 'Fullscreen (F)'}
                   >
                     {fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}

@@ -1,20 +1,20 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Popcorn Room End-to-End Watch Party Flow', () => {
+test.describe('The Orbit End-to-End Watch Party Flow', () => {
   test('Landing page renders hero, features and sound architecture', async ({ page }) => {
     await page.goto('/');
 
     // Check header and titles
-    await expect(page).toHaveTitle(/Popcorn Room/i);
-    await expect(page.getByRole('heading', { name: /watch together,\s*hear it exactly/i })).toBeVisible();
+    await expect(page).toHaveTitle(/The Orbit/i);
+    await expect(page.getByRole('heading', { name: /one screen at the center\./i })).toBeVisible();
 
     // Check features
-    await expect(page.getByText('Everything a movie night needs')).toBeVisible();
-    await expect(page.getByText('Voices never touch the movie')).toBeVisible();
+    await expect(page.getByText('Everything a watch party needs')).toBeVisible();
+    await expect(page.getByText('The movie sounds like the movie')).toBeVisible();
 
-    // Check sound rules
-    await expect(page.getByText('Stream track')).toBeVisible();
-    await expect(page.getByText('Voice track')).toBeVisible();
+    // Check sound tracks
+    await expect(page.getByText('Movie Audio Track')).toBeVisible();
+    await expect(page.getByText('Voice Mic Track')).toBeVisible();
   });
 
   test('Host creates a room, guest joins, and chat communicates', async ({ browser }) => {

@@ -67,7 +67,11 @@ const SCREEN_AUDIO_CAPTURE: AudioCaptureOptions = {
   voiceIsolation: false,
   channelCount: 2,
   sampleRate: 48000,
-};
+  googEchoCancellation: false,
+  googAutoGainControl: false,
+  googNoiseSuppression: false,
+  googHighpassFilter: false,
+} as AudioCaptureOptions;
 
 const SMART_DUCK_LEVEL = 0.7; // about -3 dB, gentle
 
@@ -309,6 +313,7 @@ class RoomController {
         audioLevel: p.isLocal ? this.localAudioLevel : p.audioLevel,
         micOn: !!mic && !mic.isMuted,
         camOn: !!cam && !cam.isMuted,
+        camTrackId: cam?.track ? cam.track.sid || cam.trackSid || 'ready' : undefined,
         sharing: !!p.getTrackPublication(Track.Source.ScreenShare),
         quality: qualityOf(p.connectionQuality),
         hand: !!pres?.hand,
@@ -527,7 +532,7 @@ class RoomController {
   }
 
   systemMessage(text: string) {
-    this.pushChat({ id: uid(), from: 'system', fromName: 'Popcorn Room', hue: 0, text, at: Date.now(), system: true });
+    this.pushChat({ id: uid(), from: 'system', fromName: 'The Orbit', hue: 0, text, at: Date.now(), system: true });
   }
 
   async sendChat(text: string, replyTo?: ChatReply, gif?: ChatGif) {
@@ -724,8 +729,9 @@ class RoomController {
     useRoom.setState({
       playhead: { ...s.playhead, time: pos },
     });
-    const leadTime = s.mode === 'local' ? 50 : 250;
-    this.commitSync({ status: 'playing', position: pos, serverTime: clock.now() + leadTime });
+    // Local movie files start instantaneously (0ms lead) so audio/video never lag behind clock and trigger speed-up
+    const leadTime = s.mode === 'local' ? 0 : 250;
+    this.commitSync({ status: 'playing', position: pos, rate: 1, serverTime: clock.now() + leadTime });
   }
 
   pause(currentPos?: number) {
@@ -872,15 +878,23 @@ class RoomController {
               } catch {}
             }
 
-            // Auto-select laptop microphone array to prevent Windows Bluetooth headset 8kHz telephone mode
+            // Auto-select a clean non-Bluetooth microphone so Windows/phones don't drop movie audio into 8kHz phone-call DSP
+            const isBtOrVirtual = (label: string, id: string) =>
+              id === 'communications' ||
+              /headset|bluetooth|buds|airpods|hands-free|handsfree|hfp|sco|ag audio|telephony/i.test(label);
+
             if (!chosenDeviceId) {
-              const internalMic = inputs.find(
+              const preferredInternal = inputs.find(
                 (d) =>
-                  /array|realtek|built-in|internal|intel|integrated|conexant|synaptics/i.test(d.label) &&
-                  !/headset|bluetooth|buds|airpods|hands-free|handsfree|bose|sony|boat|realme|oneplus|jbl/i.test(d.label),
+                  !isBtOrVirtual(d.label, d.deviceId) &&
+                  /array|realtek|built-in|internal|intel|amd|integrated|conexant|synaptics|macbook|iphone|pixel/i.test(d.label),
               );
-              if (internalMic?.deviceId) {
-                chosenDeviceId = internalMic.deviceId;
+              const anySafeNonBt = inputs.find(
+                (d) => d.deviceId && d.deviceId !== 'default' && !isBtOrVirtual(d.label, d.deviceId),
+              );
+              const picked = preferredInternal ?? anySafeNonBt;
+              if (picked?.deviceId) {
+                chosenDeviceId = picked.deviceId;
                 useRoom.getState().setAudio({ micDeviceId: chosenDeviceId });
               }
             }
@@ -891,7 +905,7 @@ class RoomController {
 
         const captureOpts: AudioCaptureOptions = {
           echoCancellation: s.audio.echoCancellation,
-          noiseSuppression: false,
+          noiseSuppression: s.audio.echoCancellation,
           autoGainControl: false,
           voiceIsolation: false,
           channelCount: 1,
@@ -901,7 +915,7 @@ class RoomController {
         }
         (captureOpts as Record<string, unknown>).googEchoCancellation = s.audio.echoCancellation;
         (captureOpts as Record<string, unknown>).googAutoGainControl = false;
-        (captureOpts as Record<string, unknown>).googNoiseSuppression = false;
+        (captureOpts as Record<string, unknown>).googNoiseSuppression = s.audio.echoCancellation;
         (captureOpts as Record<string, unknown>).googHighpassFilter = false;
         (captureOpts as Record<string, unknown>).googAudioMirroring = false;
         (captureOpts as Record<string, unknown>).voiceIsolation = false;
@@ -913,9 +927,31 @@ class RoomController {
           forceStereo: false,
         });
 
+        // Re-assert raw stereo constraints on active screen share audio so WebRTC never applies voice DSP to the movie
+        const shareAudioPub = lp.getTrackPublication(Track.Source.ScreenShareAudio);
+        if (shareAudioPub?.track?.mediaStreamTrack) {
+          void shareAudioPub.track.mediaStreamTrack
+            .applyConstraints({
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+              channelCount: 2,
+              sampleRate: 48000,
+            } as MediaTrackConstraints)
+            .catch(() => {});
+        }
+
         // Ensure microphone track is UNMUTED so the user can speak immediately
         if (pub?.track && pub.track.isMuted) {
           await pub.track.unmute();
+        }
+
+        const activeMicLabel = pub?.track?.mediaStreamTrack?.label || '';
+        if (/hands-free|handsfree|hfp|sco|ag audio|bluetooth|buds|airpods/i.test(activeMicLabel)) {
+          toast.warning('Bluetooth headset mic active', {
+            description: 'Bluetooth switches movie sound to 8kHz mono when its mic is used. Pick your laptop mic in Mixer for hi-fi stereo.',
+            duration: 9000,
+          });
         }
 
         // Start live local speech & audio transmission monitor
@@ -1156,7 +1192,7 @@ class RoomController {
     const capture: ScreenShareCaptureOptions = {
       audio: SCREEN_AUDIO_CAPTURE,
       resolution: share60 ? { width: 1920, height: 1080, frameRate: 60 } : ScreenSharePresets.h1080fps30.resolution,
-      contentHint: 'motion', // tell the encoder this is video, not slides
+      contentHint: 'detail', // keep crisp edges, sharp text, and accurate colors
       systemAudio: 'include',
       // NOTE: the blueprint suggested `true`, but that silences the shared tab for the presenter
       // (they never receive their own stream back). Keep local playback so the host hears it too.
@@ -1169,10 +1205,11 @@ class RoomController {
       forceStereo: true,
       dtx: false, // never stop sending in quiet scenes
       red: true, // redundancy hides packet loss
+      simulcast: false, // always deliver full native resolution instead of blurry lower layers
       videoCodec: 'vp9',
       backupCodec: { codec: 'h264' },
-      screenShareEncoding: { maxBitrate: share60 ? 8_000_000 : 6_000_000, maxFramerate: share60 ? 60 : 30 },
-      degradationPreference: 'maintain-framerate', // quality drops before smoothness does
+      screenShareEncoding: { maxBitrate: share60 ? 12_000_000 : 9_000_000, maxFramerate: share60 ? 60 : 30 },
+      degradationPreference: 'maintain-resolution', // preserve sharpness and colors rather than downscaling/blurring
     };
 
     try {

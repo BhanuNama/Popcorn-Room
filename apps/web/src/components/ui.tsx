@@ -16,13 +16,13 @@ type Variant = 'primary' | 'ink' | 'ghost' | 'glass' | 'danger' | 'light' | 'out
 type Size = 'sm' | 'md' | 'lg' | 'icon' | 'icon-lg';
 
 const variants: Record<Variant, string> = {
-  primary: 'bg-coral-500 text-white hover:bg-coral-600 shadow-[0_8px_24px_-8px_rgb(255_92_138/0.7)]',
-  ink: 'bg-ink-800 text-white hover:bg-ink-700 shadow-[0_8px_20px_-8px_rgb(28_31_74/0.6)]',
+  primary: 'bg-coral-500 text-white hover:bg-coral-600 shadow-[0_8px_24px_-8px_rgb(99_102_241/0.55)]',
+  ink: 'bg-ink-800 text-white hover:bg-ink-700 shadow-[0_8px_20px_-8px_rgb(15_23_42/0.45)]',
   ghost: 'text-white/80 hover:bg-white/10 hover:text-white',
-  glass: 'bg-white/[0.07] text-white ring-1 ring-white/10 hover:bg-white/[0.12]',
+  glass: 'bg-white/[0.08] text-white ring-1 ring-white/12 hover:bg-white/[0.14]',
   danger: 'bg-red-500/90 text-white hover:bg-red-500',
   light: 'bg-white text-ink-800 ring-1 ring-ink-800/10 hover:bg-ink-50',
-  outline: 'text-ink-800 ring-1 ring-ink-800/15 hover:bg-white/70',
+  outline: 'text-ink-800 ring-1 ring-ink-800/15 hover:bg-white/80',
 };
 const sizes: Record<Size, string> = {
   sm: 'h-8 px-3 text-xs rounded-lg gap-1.5',
@@ -43,7 +43,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     return (
       <motion.button
         ref={ref}
-        whileTap={reduce || props.disabled ? undefined : { scale: 0.95 }}
+        whileHover={reduce || props.disabled ? undefined : { y: -1 }}
+        whileTap={reduce || props.disabled ? undefined : { scale: 0.96 }}
         transition={spring}
         className={cn(
           'inline-flex select-none items-center justify-center font-medium whitespace-nowrap transition-colors disabled:opacity-45',
@@ -120,14 +121,15 @@ export function Slider({
 
 /* ------------------------------ Switch ------------------------------ */
 
-export function Switch({ checked, onChange, label, light }: { checked: boolean; onChange: (v: boolean) => void; label: string; light?: boolean }) {
+export function Switch({ checked, onChange, label, light, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; light?: boolean; disabled?: boolean }) {
   return (
     <SwitchPrimitive.Root
       checked={checked}
       onCheckedChange={onChange}
+      disabled={disabled}
       aria-label={label}
       className={cn(
-        'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
+        'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-45',
         checked ? 'bg-coral-500' : light ? 'bg-ink-200' : 'bg-white/15',
       )}
     >

@@ -457,10 +457,10 @@ function ConsentModal({
   };
 
   const descriptions = {
-    mic: "Popcorn Room needs microphone access so your friends can hear you. Your voice travels as a separate track and will never distort the movie's audio.",
-    camera: 'Popcorn Room needs camera access to display your live video tile beside the movie.',
+    mic: "The Orbit needs microphone access so your friends can hear you. Your voice travels as a separate track and will never distort the movie's audio.",
+    camera: 'The Orbit needs camera access to display your live video tile beside the movie.',
     screen:
-      'Popcorn Room captures your selected tab or window along with high-definition stereo audio (256 kbps transparent Opus) for the party.',
+      'The Orbit captures your selected tab or window along with high-definition stereo audio (256 kbps transparent Opus) for your watch party.',
   };
 
   return (

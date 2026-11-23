@@ -29,6 +29,7 @@ export interface PersonVM {
   audioLevel: number;
   micOn: boolean;
   camOn: boolean;
+  camTrackId?: string;
   sharing: boolean;
   quality: Quality;
   hand: boolean;
@@ -83,6 +84,14 @@ export interface LocalMovieState {
     fontSize: 'sm' | 'md' | 'lg' | 'xl';
     enabled: boolean;
   } | null;
+}
+
+export interface AmbientColors {
+  top: string;
+  bottom: string;
+  left: string;
+  right: string;
+  center: string;
 }
 
 export type PanelTab = 'chat' | 'people' | 'queue';
@@ -148,6 +157,7 @@ export interface RoomState {
   duck: number;
   consent: { kind: 'mic' | 'camera' | 'screen'; resolve: (ok: boolean) => void } | null;
   localMovie: LocalMovieState;
+  ambient: AmbientColors | null;
 
   set: (p: Partial<RoomState>) => void;
   setUi: (p: Partial<RoomState['ui']>) => void;
@@ -198,7 +208,10 @@ const initial = () => ({
     theatre: false,
     fullscreen: false,
     pinned: null,
-    cameraLayout: loadPref<'side' | 'bottom' | 'hidden'>('cameraLayout', 'side'),
+    cameraLayout: loadPref<'side' | 'bottom' | 'hidden'>(
+      'cameraLayout',
+      typeof window !== 'undefined' && window.innerWidth < 768 ? 'bottom' : 'side',
+    ),
     theme: loadPref<RoomTheme>('theme', 'midnight'),
     ambilight: loadPref<boolean>('ambilight', true),
     sheetOpen: false,
@@ -219,6 +232,7 @@ const initial = () => ({
     duration: null,
     subtitles: null,
   },
+  ambient: null,
 });
 
 export const useRoom = create<RoomState>((set) => ({

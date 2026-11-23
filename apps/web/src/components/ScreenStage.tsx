@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { YoutubeIcon } from './YoutubeIcon';
 import { controller } from '@/room/controller';
+import { caps } from '@/lib/browser';
 import { useRoom } from '@/store/room';
 import { AmbientGlow } from './AmbientGlow';
 import { Button } from './ui';
@@ -22,6 +23,11 @@ import { toggleRoomFullscreen } from '@/lib/fullscreen';
 
 export function ScreenStage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [videoElState, setVideoElState] = useState<HTMLVideoElement | null>(null);
+  const setVideoNode = (el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el !== videoElState) setVideoElState(el);
+  };
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const localSharing = useRoom((s) => s.local.sharing);
@@ -132,18 +138,20 @@ export function ScreenStage() {
       ref={containerRef}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      className="group relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-black"
+      className="group relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl p-1 sm:p-2"
     >
       {/* Ambient Glow behind video */}
-      <AmbientGlow videoEl={videoRef.current} active={hasVideo} />
+      <AmbientGlow videoEl={videoElState} active={hasVideo} />
 
-      {/* Actual video element */}
+      {/* Actual video element — kept rendered (opacity-0 when idle) so adaptiveStream never locks into 0x0 low-res */}
       <video
-        ref={videoRef}
+        ref={setVideoNode}
         playsInline
         autoPlay
         muted // Muted locally so presenter hears their original or remote audio through WebAudio gain node
-        className={`h-full w-full object-contain ${!hasVideo ? 'hidden' : 'block'}`}
+        className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${
+          !hasVideo ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
+        }`}
       />
 
       {/* Screen Sharer Pill */}
@@ -224,47 +232,82 @@ export function ScreenStage() {
         </AnimatePresence>
       </div>
 
-      {/* Empty State / Stage Placeholder when nothing is being shared */}
+      {/* Atmospheric Orbital Screening Lounge Empty State */}
       {!hasVideo && (
-        <div className="flex flex-col items-center justify-center p-8 text-center text-white/80">
-          <div className="relative mb-6">
-            <div className="absolute -inset-4 rounded-full bg-coral-500/20 blur-xl" />
-            <div className="relative grid h-20 w-20 place-items-center rounded-3xl bg-white/10 ring-1 ring-white/15 backdrop-blur-xl">
-              <MonitorUp size={36} className="text-coral-400" />
+        <div className="relative z-10 flex w-full max-w-2xl flex-col items-center justify-center p-5 sm:p-8 text-center text-white">
+          {/* Concentric glowing orbital rings behind stage center */}
+          <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
+            <div className="animate-orbit-slow h-72 w-72 sm:h-96 sm:w-96 rounded-full border border-white/[0.06]">
+              <span className="absolute -top-1 left-1/2 h-2 w-2 rounded-full bg-amber-300/80 shadow-[0_0_12px_rgba(251,191,36,0.7)]" />
+            </div>
+            <div className="animate-orbit-rev absolute h-48 w-48 sm:h-64 sm:w-64 rounded-full border border-dashed border-coral-400/20">
+              <span className="absolute bottom-0 left-1/2 h-1.5 w-1.5 rounded-full bg-coral-400" />
             </div>
           </div>
-          <h2 className="font-display text-2xl font-bold text-white sm:text-3xl">
-            Stage is ready
+
+          <div className="relative mb-5">
+            <div className="absolute -inset-4 rounded-full bg-coral-500/20 blur-2xl" />
+            <div className="animate-float-gentle relative grid h-16 w-16 sm:h-20 sm:w-20 place-items-center rounded-3xl bg-white/[0.08] ring-1 ring-white/15 backdrop-blur-xl shadow-float">
+              <MonitorUp size={30} className="text-coral-300" />
+            </div>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.07] px-3 py-1 text-[11px] font-medium text-white/70 ring-1 ring-white/10 mb-3">
+            <Sparkles size={12} className="text-amber-300" />
+            <span>The Orbit · Watch Together</span>
+          </div>
+
+          <h2 className="font-display text-xl font-bold tracking-tight text-white sm:text-3xl">
+            Pick what everyone watches together
           </h2>
-          <p className="mt-2 max-w-md text-sm text-white/60">
-            Share a browser tab, an application or your whole screen with stereo audio, or paste a
-            YouTube link to watch together.
+          <p className="mt-2 max-w-md text-xs sm:text-sm text-white/55 leading-relaxed">
+            Share a browser tab in crisp stereo, watch YouTube in real-time lockstep, or drop any local video file straight onto the screen.
           </p>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-            <Button
-              variant="primary"
-              size="md"
-              onClick={() => controller.startShare()}
-              className="gap-2"
-            >
-              <MonitorUp size={16} /> Share Screen
-            </Button>
-            <Button
-              variant="glass"
-              size="md"
+
+          {/* 3-Card Interactive Launch Dock */}
+          <div
+            className={`mt-6 grid w-full grid-cols-1 gap-2.5 ${caps.canShareScreen ? 'sm:grid-cols-3' : 'sm:grid-cols-2 max-w-lg'}`}
+          >
+            {caps.canShareScreen && (
+              <button
+                onClick={() => controller.startShare()}
+                className="butter-btn group flex sm:flex-col items-center sm:items-start gap-3 sm:gap-2 rounded-2xl bg-coral-500/20 hover:bg-coral-500/30 p-3.5 sm:p-4 text-left ring-1 ring-coral-400/40 backdrop-blur-md"
+              >
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-coral-500 text-white shadow">
+                  <MonitorUp size={17} />
+                </span>
+                <div>
+                  <div className="text-xs font-bold text-white">Share Screen</div>
+                  <div className="text-[11px] text-white/60 mt-0.5">60 fps · Stereo audio</div>
+                </div>
+              </button>
+            )}
+
+            <button
               onClick={() => useRoom.getState().setUi({ youtubeDialog: true })}
-              className="gap-2"
+              className="butter-btn group flex sm:flex-col items-center sm:items-start gap-3 sm:gap-2 rounded-2xl bg-white/[0.06] hover:bg-white/[0.11] p-3.5 sm:p-4 text-left ring-1 ring-white/10 backdrop-blur-md"
             >
-              <YoutubeIcon size={16} className="text-red-400" /> YouTube Mode
-            </Button>
-            <Button
-              variant="glass"
-              size="md"
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-red-500/20 text-red-400 ring-1 ring-red-500/30">
+                <YoutubeIcon size={17} />
+              </span>
+              <div>
+                <div className="text-xs font-bold text-white">YouTube Sync</div>
+                <div className="text-[11px] text-white/55 mt-0.5">Paste URL · Queue</div>
+              </div>
+            </button>
+
+            <button
               onClick={() => controller.setMode('local')}
-              className="gap-2"
+              className="butter-btn group flex sm:flex-col items-center sm:items-start gap-3 sm:gap-2 rounded-2xl bg-white/[0.06] hover:bg-white/[0.11] p-3.5 sm:p-4 text-left ring-1 ring-white/10 backdrop-blur-md"
             >
-              <Film size={16} className="text-coral-400" /> Play Local Movie (4K Drop)
-            </Button>
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/30">
+                <Film size={17} />
+              </span>
+              <div>
+                <div className="text-xs font-bold text-white">Local 4K Drop</div>
+                <div className="text-[11px] text-white/55 mt-0.5">.mp4 / .mkv + subtitles</div>
+              </div>
+            </button>
           </div>
         </div>
       )}

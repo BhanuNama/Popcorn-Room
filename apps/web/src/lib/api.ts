@@ -24,7 +24,7 @@ async function call<T>(path: string, init?: RequestInit & { json?: unknown }): P
     headers: init?.json !== undefined ? { 'content-type': 'application/json', ...init?.headers } : init?.headers,
     body: init?.json !== undefined ? JSON.stringify(init.json) : init?.body,
   }).catch(() => {
-    throw new ApiError(0, 'Cannot reach the Popcorn Room server. Is the API running?');
+    throw new ApiError(0, 'Cannot reach The Orbit server. Is the API running?');
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error || `Request failed (${res.status})`);

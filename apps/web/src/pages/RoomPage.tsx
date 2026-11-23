@@ -51,6 +51,8 @@ export default function RoomPage() {
   const fullscreen = useRoom((s) => s.ui.fullscreen);
   const cameraLayout = useRoom((s) => s.ui.cameraLayout);
   const theme = useRoom((s) => s.ui.theme);
+  const ambient = useRoom((s) => s.ambient);
+  const ambilight = useRoom((s) => s.ui.ambilight);
   const people = useRoom((s) => s.people);
   const needsAudioUnlock = useRoom((s) => s.warnings.needsAudioUnlock);
 
@@ -285,6 +287,25 @@ export default function RoomPage() {
           isImmersive && 'bg-black',
         )}
       >
+        {/* Room-Wide Dynamic Wall Ambilight Backdrop */}
+        {ambient && ambilight && theme !== 'oled' && (
+          <div
+            aria-hidden
+            className="pointer-events-none fixed inset-0 z-0 overflow-hidden opacity-85 transition-opacity duration-700"
+          >
+            <div
+              className="absolute -inset-12 blur-3xl transition-all duration-500"
+              style={{
+                background: `
+                  radial-gradient(ellipse 75% 45% at 50% 0%, ${ambient.top}, transparent 75%),
+                  radial-gradient(ellipse 75% 45% at 50% 100%, ${ambient.bottom}, transparent 75%),
+                  radial-gradient(ellipse 45% 75% at 0% 50%, ${ambient.left}, transparent 75%),
+                  radial-gradient(ellipse 45% 75% at 100% 50%, ${ambient.right}, transparent 75%)
+                `,
+              }}
+            />
+          </div>
+        )}
         {/* Global Movie File Drag-and-Drop Overlay */}
         <AnimatePresence>
           {globalDragging && (
@@ -320,6 +341,21 @@ export default function RoomPage() {
           )}
         </AnimatePresence>
 
+        {/* Live Reconnecting Indicator */}
+        <AnimatePresence>
+          {connection === 'reconnecting' && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="pointer-events-none fixed top-16 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full bg-amber-500/95 px-4 py-1.5 text-xs font-semibold text-ink-950 shadow-float backdrop-blur"
+            >
+              <Loader2 size={13} className="animate-spin" />
+              <span>Reconnecting to room sync…</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Prominent Floating "Exit Theatre" Button */}
         {theatre && (
           <button
@@ -340,20 +376,27 @@ export default function RoomPage() {
         <main
           className={cn(
             'relative flex flex-1 overflow-hidden transition-all',
-            isImmersive ? 'p-0 gap-0' : 'p-2 sm:p-2.5 gap-2.5',
+            isImmersive ? 'p-0 gap-0' : 'px-2 sm:px-3 py-1.5 gap-2.5',
           )}
         >
-          {/* Main Content Area: Video Stage + Camera Shelf (Non-overlapping) */}
+          {/* Main Content Area: Video Stage + People Strip (Non-overlapping) */}
           <section
             aria-label="Watch party stage"
             className={cn(
               'relative flex flex-1 overflow-hidden min-w-0 transition-all',
               cameraLayout === 'bottom' ? 'flex-col' : 'flex-row',
-              isImmersive ? 'rounded-none p-0 bg-black' : 'rounded-2xl sm:rounded-3xl glass p-1.5 gap-1.5',
+              isImmersive
+                ? 'rounded-none p-0 bg-black'
+                : 'rounded-2xl sm:rounded-3xl border border-white/[0.08] bg-ink-950/35 p-1.5 sm:p-2 gap-2 backdrop-blur-xl shadow-[0_24px_80px_-24px_rgba(0,0,0,0.85)]',
             )}
           >
-            {/* The Video Stage: YouTube, Local Movie File, or Screen Share (100% UNTOUCHED, ZERO OVERLAP) */}
-            <div className="relative flex-1 min-w-0 min-h-0 overflow-hidden rounded-xl sm:rounded-2xl bg-black flex items-center justify-center">
+            {/* The Video Stage: YouTube, Local Movie File, or Screen Share */}
+            <div
+              className={cn(
+                'relative flex-1 min-w-0 min-h-0 overflow-hidden rounded-xl sm:rounded-2xl flex items-center justify-center ring-1 ring-white/[0.05]',
+                (!ambilight || theme === 'oled') && 'bg-black',
+              )}
+            >
               {mode === 'youtube' ? (
                 <YouTubeStage />
               ) : mode === 'local' ? (
@@ -363,15 +406,15 @@ export default function RoomPage() {
               )}
               <ReactionsOverlay />
 
-              {/* Show Members button when hidden */}
+              {/* Show People button when strip is hidden */}
               {cameraLayout === 'hidden' && people.length > 0 && (
                 <button
                   onClick={() => useRoom.getState().setUi({ cameraLayout: 'side' })}
-                  className="absolute top-4 left-4 z-20 flex items-center gap-1.5 rounded-full bg-ink-950/80 px-3 py-1.5 text-xs font-semibold text-white/90 backdrop-blur-md ring-1 ring-white/10 hover:bg-ink-900 shadow-float transition"
-                  title="Show member cameras"
+                  className="butter-btn absolute top-3.5 left-3.5 z-20 flex items-center gap-1.5 rounded-full bg-ink-950/85 px-3 py-1.5 text-xs font-semibold text-white/90 backdrop-blur-md ring-1 ring-white/15 hover:bg-ink-900 shadow-float"
+                  title="Show People & cameras"
                 >
                   <Users size={13} className="text-coral-400" />
-                  <span>Show Members ({people.length})</span>
+                  <span>Show People ({people.length})</span>
                 </button>
               )}
             </div>
@@ -388,7 +431,7 @@ export default function RoomPage() {
 
         {/* Bottom Control Bar in Normal View */}
         {!isImmersive && (
-          <footer className="px-3 pb-2 pt-0">
+          <footer className="relative z-20 px-2 sm:px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-0">
             <ControlBar />
           </footer>
         )}
@@ -405,22 +448,27 @@ export default function RoomPage() {
     );
   }
 
-  // Pre-join / Loading / Error Screens
+  // Pre-join / Loading / Error Screens (matched to The Orbit dark glass aesthetic)
   return (
-    <div className="relative flex min-h-full items-center justify-center bg-pastel p-4">
-      <div className="pointer-events-none fixed inset-0 dot-grid opacity-60" />
+    <div className="relative flex min-h-full items-center justify-center overflow-hidden bg-[#060913] p-4 text-white">
+      {/* Subtle orbital rings & ambient nebula glow */}
+      <div aria-hidden className="pointer-events-none fixed inset-0 flex items-center justify-center overflow-hidden">
+        <div className="absolute -top-32 left-1/2 -translate-x-1/2 h-96 w-[38rem] rounded-full bg-coral-500/12 blur-3xl" />
+        <div className="animate-orbit-slow h-[34rem] w-[34rem] rounded-full border border-white/[0.04]" />
+        <div className="animate-orbit-rev absolute h-[22rem] w-[22rem] rounded-full border border-dashed border-coral-400/15" />
+      </div>
 
       <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
+        initial={{ opacity: 0, scale: 0.96, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={softSpring}
-        className="card relative w-full max-w-md p-7 sm:p-8 shadow-float ring-1 ring-ink-800/10 text-ink-800"
+        className="glass-strong relative w-full max-w-md rounded-3xl p-7 sm:p-8 shadow-float ring-1 ring-white/10 text-white"
       >
-        <div className="flex items-center justify-between border-b border-ink-800/5 pb-4">
-          <Logo />
+        <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <Logo dark />
           <button
             onClick={() => navigate('/')}
-            className="grid h-8 w-8 place-items-center rounded-lg text-ink-400 hover:bg-ink-100 transition"
+            className="grid h-8 w-8 place-items-center rounded-xl text-white/55 hover:bg-white/10 hover:text-white transition"
             title="Home"
           >
             <Home size={16} />
@@ -428,40 +476,40 @@ export default function RoomPage() {
         </div>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-12 text-ink-400">
-            <Loader2 size={32} className="animate-spin text-coral-500 mb-3" />
+          <div className="flex flex-col items-center justify-center py-12 text-white/55">
+            <Loader2 size={32} className="animate-spin text-coral-400 mb-3" />
             <p className="text-sm font-medium">Entering room...</p>
           </div>
         ) : error ? (
           <div className="py-8 text-center space-y-4">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-100 text-red-600">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-red-500/20 text-red-400 ring-1 ring-red-500/30">
               <AlertCircle size={24} />
             </div>
             <div>
-              <h3 className="font-display text-lg font-bold">Could not join room</h3>
-              <p className="mt-1 text-xs text-ink-500">{error}</p>
+              <h3 className="font-display text-lg font-bold text-white">Could not join room</h3>
+              <p className="mt-1 text-xs text-white/55">{error}</p>
             </div>
-            <Button variant="ink" size="md" className="w-full" onClick={() => navigate('/')}>
+            <Button variant="primary" size="md" className="w-full" onClick={() => navigate('/')}>
               Back to Home
             </Button>
           </div>
         ) : knockingId ? (
           /* Knocking State */
           <div className="py-8 text-center space-y-4">
-            <div className="relative mx-auto grid h-14 w-14 place-items-center rounded-3xl bg-blush-100 text-coral-600">
+            <div className="relative mx-auto grid h-14 w-14 place-items-center rounded-3xl bg-coral-500/20 text-coral-300 ring-1 ring-coral-400/30">
               <Loader2 size={28} className="animate-spin" />
             </div>
             <div>
-              <h3 className="font-display text-lg font-bold">Knocking to enter...</h3>
-              <p className="mt-1 text-xs text-ink-500 max-w-xs mx-auto">
+              <h3 className="font-display text-lg font-bold text-white">Knocking to enter...</h3>
+              <p className="mt-1 text-xs text-white/55 max-w-xs mx-auto">
                 The host has been notified. You will join automatically as soon as they let you in.
               </p>
             </div>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => setKnockingId(null)}
-              className="mt-2"
+              className="mt-2 ring-1 ring-white/15"
             >
               Cancel
             </Button>
@@ -469,15 +517,15 @@ export default function RoomPage() {
         ) : disconnectReason ? (
           /* Disconnected State */
           <div className="py-8 text-center space-y-4">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-amber-100 text-amber-600">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/30">
               <AlertCircle size={24} />
             </div>
             <div>
-              <h3 className="font-display text-lg font-bold">Disconnected</h3>
-              <p className="mt-1 text-xs text-ink-500">{disconnectReason}</p>
+              <h3 className="font-display text-lg font-bold text-white">Disconnected</h3>
+              <p className="mt-1 text-xs text-white/55">{disconnectReason}</p>
             </div>
             <Button
-              variant="ink"
+              variant="primary"
               size="md"
               className="w-full"
               onClick={() => {
@@ -492,22 +540,21 @@ export default function RoomPage() {
           /* Join Form */
           <form onSubmit={handleJoinSubmit} className="mt-6 space-y-4">
             <div className="text-center">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-blush-100 px-3 py-1 text-xs font-semibold text-coral-600">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-coral-500/15 px-3 py-1 text-xs font-semibold text-coral-300 ring-1 ring-coral-400/25">
                 <Sparkles size={12} /> Watch Party Room
               </span>
-              <h2 className="mt-3 font-display text-2xl font-bold">{roomInfo?.name}</h2>
-              <p className="mt-1 text-xs text-ink-400">
-                Studio-clean shared sound · Synced YouTube · Chat & Reactions
+              <h2 className="mt-3 font-display text-2xl font-bold text-white">{roomInfo?.name}</h2>
+              <p className="mt-1 text-xs text-white/50">
+                Studio-clean sound · Synced playback · Live chat & reactions
               </p>
             </div>
 
             <div className="space-y-3 pt-2">
               <label className="block">
-                <span className="mb-1.5 block text-xs font-semibold text-ink-600">
+                <span className="mb-1.5 block text-xs font-semibold text-white/75">
                   Your Display Name
                 </span>
                 <Input
-                  light
                   autoFocus
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -519,14 +566,13 @@ export default function RoomPage() {
 
               {roomInfo?.hasPassword && (
                 <label className="block">
-                  <span className="mb-1.5 flex items-center justify-between text-xs font-semibold text-ink-600">
+                  <span className="mb-1.5 flex items-center justify-between text-xs font-semibold text-white/75">
                     <span className="flex items-center gap-1">
                       <Lock size={12} /> Room Password
                     </span>
-                    <span className="text-[10px] text-coral-500 font-normal">Required</span>
+                    <span className="text-[10px] text-coral-300 font-normal">Required</span>
                   </span>
                   <Input
-                    light
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -540,12 +586,12 @@ export default function RoomPage() {
 
             <Button
               type="submit"
-              variant="ink"
+              variant="primary"
               size="lg"
-              className="w-full mt-2"
+              className="w-full mt-2 shadow-glow"
               disabled={joining || !name.trim()}
             >
-              {joining ? 'Connecting…' : roomInfo?.knock ? 'Knock to Enter' : 'Join Room'}
+              {joining ? 'Joining…' : roomInfo?.knock ? 'Knock to Enter' : 'Join Room'}
               <ArrowRight size={17} />
             </Button>
           </form>

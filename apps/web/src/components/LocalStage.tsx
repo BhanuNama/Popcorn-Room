@@ -18,7 +18,7 @@ import {
   Clock,
   Sparkles,
 } from 'lucide-react';
-import { decideDrift, expectedPosition, formatTime, msUntilStart } from '@popcorn/shared';
+import { expectedPosition, formatTime, msUntilStart } from '@popcorn/shared';
 import { clock } from '@/lib/clock';
 import { controller } from '@/room/controller';
 import { canControl, useRoom } from '@/store/room';
@@ -31,10 +31,17 @@ import { isTypingTarget } from '@/lib/utils';
 
 export function LocalStage() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [videoElState, setVideoElState] = useState<HTMLVideoElement | null>(null);
+  const setVideoNode = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    setVideoElState((prev) => (prev === el ? prev : el));
+  }, []);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const subInputRef = useRef<HTMLInputElement | null>(null);
   const driftTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playTransitionAtRef = useRef<number>(0);
   const hideControlsTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sync = useRoom((s) => s.sync);
@@ -203,6 +210,7 @@ export function LocalStage() {
     if (!v) return;
     setDuration(v.duration || 0);
     setLocalMovie({ duration: v.duration || 0 });
+    v.playbackRate = sync.rate || 1;
     v.muted = false;
     v.volume = streamVolume > 0 ? streamVolume : 1;
     // If sync has a position, seek to expected position
@@ -308,20 +316,33 @@ export function LocalStage() {
     const v = videoRef.current;
     if (!v || !localMovie.url) return;
 
+    const clearPendingCountdown = () => {
+      if (countdownTimerRef.current) {
+        clearTimeout(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+    };
+
     const tick = () => {
       if (isScrubbing) return;
 
+      const targetRate = sync.rate || 1;
+      if (Math.abs(v.playbackRate - targetRate) > 1e-3) {
+        v.playbackRate = targetRate;
+      }
+
       const vTime = v.currentTime;
-      const vRate = v.playbackRate;
       const until = msUntilStart(sync, clock.offsetMs);
 
-      // Countdown in progress (future timestamp)
+      // Scheduled start countdown (3-2-1): wait accurately until `until` reaches 0
       if (until > 0) {
         setCountdownNum(Math.ceil(until / 1000));
         if (!v.paused) v.pause();
-        if (Math.abs(vTime - sync.position) > 0.5) {
+        if (Math.abs(vTime - sync.position) > 0.35) {
           v.currentTime = sync.position;
         }
+        clearPendingCountdown();
+        countdownTimerRef.current = setTimeout(tick, Math.min(until + 5, 1000));
         return;
       } else {
         setCountdownNum(null);
@@ -329,30 +350,36 @@ export function LocalStage() {
 
       if (sync.status === 'paused') {
         if (!v.paused) v.pause();
-        if (Math.abs(vTime - sync.position) > 0.5) {
+        if (Math.abs(vTime - sync.position) > 0.35) {
           v.currentTime = sync.position;
         }
         return;
       }
 
       if (sync.status === 'playing') {
+        const expected = expectedPosition(sync, clock.offsetMs);
+
+        // Start playback at exact position — never alter playbackRate (preserves true music speed & pitch)
         if (v.paused) {
+          if (Math.abs(vTime - expected) > 0.35) {
+            v.currentTime = expected;
+          }
+          playTransitionAtRef.current = Date.now();
           v.play().catch((err) => {
             if (err.name === 'NotAllowedError') {
               v.muted = true;
               v.play().then(() => setNeedsAudioInteraction(true)).catch(() => {});
             }
           });
+          return;
         }
 
-        const action = decideDrift(vTime, vRate, sync, clock.offsetMs);
-        if (action.kind === 'seek') {
-          v.currentTime = action.to;
-          v.playbackRate = sync.rate;
-        } else if (action.kind === 'rate') {
-          v.playbackRate = action.rate;
-        } else if (action.kind === 'restoreRate') {
-          v.playbackRate = action.rate;
+        // Allow brief decoder spin-up after play/unpause before enforcing drift re-seek
+        if (Date.now() - playTransitionAtRef.current < 1400) return;
+
+        const drift = Math.abs(vTime - expected);
+        if (drift > 1.5) {
+          v.currentTime = expected;
         }
       }
     };
@@ -360,6 +387,7 @@ export function LocalStage() {
     tick();
     driftTimerRef.current = setInterval(tick, 1500);
     return () => {
+      clearPendingCountdown();
       if (driftTimerRef.current) clearInterval(driftTimerRef.current);
     };
   }, [sync, localMovie.url, isScrubbing]);
@@ -390,11 +418,11 @@ export function LocalStage() {
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className="relative flex h-full w-full select-none items-center justify-center overflow-hidden bg-black"
+      className="relative flex h-full w-full select-none items-center justify-center overflow-hidden p-1 sm:p-2"
     >
       {/* Dynamic 4-zone edge Ambilight Bias Lighting */}
       <AmbientGlow
-        videoEl={videoRef.current}
+        videoEl={videoElState}
         active={Boolean(localMovie.url && ambilight)}
       />
 
@@ -442,29 +470,34 @@ export function LocalStage() {
 
       {/* Case 1: No local file loaded yet */}
       {!localMovie.url ? (
-        <div className="z-10 flex max-w-lg flex-col items-center justify-center p-8 text-center">
-          <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-white/5 border border-white/10 shadow-2xl mb-6 backdrop-blur">
-            <Film className="h-10 w-10 text-coral-400" />
+        <div className="relative z-10 flex max-w-lg flex-col items-center justify-center p-6 sm:p-8 text-center">
+          <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
+            <div className="animate-orbit-slow h-72 w-72 rounded-full border border-white/[0.06]" />
+            <div className="animate-orbit-rev absolute h-48 w-48 rounded-full border border-dashed border-coral-400/20" />
           </div>
 
-          <h2 className="text-2xl font-bold tracking-tight text-white mb-2">
-            Local Video File Sync
+          <div className="animate-float-gentle relative flex h-20 w-20 items-center justify-center rounded-3xl bg-white/[0.07] border border-white/15 shadow-2xl mb-6 backdrop-blur-xl">
+            <Film className="h-9 w-9 text-coral-300" />
+          </div>
+
+          <h2 className="font-display text-2xl font-bold tracking-tight text-white mb-2">
+            4K Local Movie Drop
           </h2>
-          <p className="text-sm text-zinc-400 mb-6 leading-relaxed">
-            Watch any video together in <strong className="text-white">100% native 4K quality</strong> with zero server compression. Everyone loads their local copy and playback stays perfectly synchronized.
+          <p className="text-xs sm:text-sm text-zinc-400 mb-6 leading-relaxed">
+            Watch any local film together in <strong className="text-white">100% native quality</strong> with zero compression. Everyone drops their file and stays locked in sync.
           </p>
 
           {/* If the host already announced a movie */}
           {sync.videoId && (
-            <div className="mb-6 w-full rounded-xl border border-coral-500/30 bg-coral-500/10 p-4 text-left">
-              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-coral-400 mb-1">
+            <div className="mb-6 w-full rounded-2xl border border-coral-500/30 bg-coral-500/10 p-4 text-left backdrop-blur">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-coral-300 mb-1">
                 <Sparkles className="h-4 w-4" /> Room Movie Selected
               </div>
               <div className="truncate text-sm font-semibold text-white">
                 {sync.videoId}
               </div>
               <p className="text-xs text-zinc-300 mt-1">
-                Select or drop your copy of this video to join the synced party!
+                Drop or choose your copy of this file to sync up with the room!
               </p>
             </div>
           )}
@@ -472,14 +505,14 @@ export function LocalStage() {
           <div className="flex flex-wrap items-center justify-center gap-3">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 rounded-xl bg-coral-500 hover:bg-coral-600 text-white font-bold px-6 py-3.5 shadow-lg shadow-coral-500/25 transition-all active:scale-95 text-sm cursor-pointer"
+              className="butter-btn flex items-center gap-2 rounded-xl bg-coral-500 hover:bg-coral-600 text-white font-semibold px-6 py-3.5 shadow-lg shadow-coral-500/25 text-sm cursor-pointer"
             >
               <Upload className="h-4 w-4" />
               Choose Movie File (.mp4, .mkv, .webm)
             </button>
             <button
               onClick={() => subInputRef.current?.click()}
-              className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/10 hover:bg-white/15 text-white font-medium px-5 py-3.5 transition-all active:scale-95 text-sm cursor-pointer"
+              className="butter-btn flex items-center gap-2 rounded-xl border border-white/15 bg-white/[0.08] hover:bg-white/[0.14] text-white font-medium px-5 py-3.5 text-sm cursor-pointer"
             >
               <SubtitlesIcon className="h-4 w-4" />
               Add Subtitle (.srt / .vtt)
@@ -495,15 +528,15 @@ export function LocalStage() {
               togglePlay();
             }
           }}
-          onDoubleClick={toggleRoomFullscreen}
+          onDoubleClick={() => void toggleRoomFullscreen()}
         >
           <video
-            ref={videoRef}
+            ref={setVideoNode}
             src={localMovie.url}
             onLoadedMetadata={onLoadedMetadata}
             onTimeUpdate={onTimeUpdate}
             onEnded={() => controller.onVideoEnded()}
-            className={`max-h-full max-w-full object-contain ${cueClass}`}
+            className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${cueClass}`}
             playsInline
           >
             {localMovie.subtitles?.enabled && localMovie.subtitles.url && (
@@ -818,7 +851,7 @@ export function LocalStage() {
 
                     {/* Fullscreen Button */}
                     <button
-                      onClick={toggleRoomFullscreen}
+                      onClick={() => void toggleRoomFullscreen()}
                       className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white"
                       title={fullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
                     >
