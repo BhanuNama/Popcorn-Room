@@ -53,27 +53,19 @@ type JoinOk = Extract<JoinResponse, { status: 'ok' }>;
 /*  Audio rules (blueprint 2.2)                                                */
 /* -------------------------------------------------------------------------- */
 
-/** Voice: raw studio capture with all voice isolation, echo cancellation and gain pumping OFF. */
+/** Voice: clean W3C constraints without legacy goog* overrides or forced mono downmixing. */
 const VOICE_CAPTURE: AudioCaptureOptions = {
   echoCancellation: false,
   noiseSuppression: false,
   autoGainControl: false,
-  voiceIsolation: false,
-  channelCount: 1,
 };
 
-/** Shared content audio: stereo 48 kHz, ALL voice processing and isolation strictly OFF. */
+/** Shared content audio: native system/tab format with all voice processing strictly OFF. */
 const SCREEN_AUDIO_CAPTURE: AudioCaptureOptions = {
   echoCancellation: false,
   noiseSuppression: false,
   autoGainControl: false,
-  voiceIsolation: false,
-  channelCount: 2,
-  googEchoCancellation: false,
-  googAutoGainControl: false,
-  googNoiseSuppression: false,
-  googHighpassFilter: false,
-} as AudioCaptureOptions;
+};
 
 const SMART_DUCK_LEVEL = 0.7; // about -3 dB, gentle
 
@@ -998,18 +990,10 @@ class RoomController {
           echoCancellation: s.audio.echoCancellation,
           noiseSuppression: s.audio.echoCancellation,
           autoGainControl: false,
-          voiceIsolation: false,
-          channelCount: 1,
         };
         if (chosenDeviceId) {
           captureOpts.deviceId = { exact: chosenDeviceId };
         }
-        (captureOpts as Record<string, unknown>).googEchoCancellation = s.audio.echoCancellation;
-        (captureOpts as Record<string, unknown>).googAutoGainControl = false;
-        (captureOpts as Record<string, unknown>).googNoiseSuppression = s.audio.echoCancellation;
-        (captureOpts as Record<string, unknown>).googHighpassFilter = false;
-        (captureOpts as Record<string, unknown>).googAudioMirroring = false;
-        (captureOpts as Record<string, unknown>).voiceIsolation = false;
 
         const pub = await lp.setMicrophoneEnabled(true, captureOpts, {
           audioPreset: { maxBitrate: 40_000 },
@@ -1017,6 +1001,9 @@ class RoomController {
           red: true,
           forceStereo: false,
         });
+        if (pub?.track?.mediaStreamTrack) {
+          console.info('[Orbit Mic]', pub.track.mediaStreamTrack.label, pub.track.mediaStreamTrack.getSettings());
+        }
 
         // Ensure microphone track is UNMUTED so the user can speak immediately
         if (pub?.track && pub.track.isMuted) {
@@ -1119,12 +1106,8 @@ class RoomController {
 
     try {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      let ctx: AudioContext;
-      try {
-        ctx = new AudioCtx({ sinkId: { type: 'none' } } as unknown as AudioContextOptions);
-      } catch {
-        ctx = new AudioCtx();
-      }
+      // Only attach local analyser when silent sinkId ('none') is supported so we never open an extra speaker output stream
+      const ctx = new AudioCtx({ sinkId: { type: 'none' } } as unknown as AudioContextOptions);
       if (ctx.state === 'suspended') {
         void ctx.resume();
       }
