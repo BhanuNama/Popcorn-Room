@@ -997,7 +997,7 @@ class RoomController {
 
         const captureOpts: AudioCaptureOptions = {
           echoCancellation: s.audio.echoCancellation,
-          noiseSuppression: s.audio.echoCancellation,
+          noiseSuppression: false,
           autoGainControl: false,
           voiceIsolation: false,
           channelCount: 1,
@@ -1007,7 +1007,7 @@ class RoomController {
         }
         (captureOpts as Record<string, unknown>).googEchoCancellation = s.audio.echoCancellation;
         (captureOpts as Record<string, unknown>).googAutoGainControl = false;
-        (captureOpts as Record<string, unknown>).googNoiseSuppression = s.audio.echoCancellation;
+        (captureOpts as Record<string, unknown>).googNoiseSuppression = false;
         (captureOpts as Record<string, unknown>).googHighpassFilter = false;
         (captureOpts as Record<string, unknown>).googAudioMirroring = false;
         (captureOpts as Record<string, unknown>).voiceIsolation = false;

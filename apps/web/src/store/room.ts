@@ -174,7 +174,7 @@ const audioDefaults: AudioPrefs = {
   smartDuck: loadPref('smartDuck', false),
   pushToTalk: loadPref('pushToTalk', false),
   share60: loadPref('share60', true),
-  echoCancellation: loadPref('echoCancellation', false),
+  echoCancellation: loadPref('echoCancellation', true),
   micDeviceId: loadPref('micDeviceId', ''),
 };
 
