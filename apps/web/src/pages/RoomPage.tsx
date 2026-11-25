@@ -19,11 +19,13 @@ import { toast } from 'sonner';
 import { api, ApiError } from '@/lib/api';
 import { session } from '@/lib/session';
 import { controller } from '@/room/controller';
+import { isAudioDropCandidate } from '@/room/p2pAudio';
 import { useRoom } from '@/store/room';
 import { TopBar } from '@/components/TopBar';
 import { ScreenStage } from '@/components/ScreenStage';
 import { YouTubeStage } from '@/components/YouTubeStage';
 import { LocalStage } from '@/components/LocalStage';
+import { MusicStage } from '@/components/MusicStage';
 import { CameraStrip } from '@/components/CameraStrip';
 import { RightPanel } from '@/components/RightPanel';
 import { ControlBar } from '@/components/ControlBar';
@@ -46,6 +48,8 @@ export default function RoomPage() {
 
   const connection = useRoom((s) => s.connection);
   const disconnectReason = useRoom((s) => s.disconnectReason);
+  const storeRoomInfo = useRoom((s) => s.roomInfo);
+  const me = useRoom((s) => s.me);
   const mode = useRoom((s) => s.mode);
   const theatre = useRoom((s) => s.ui.theatre);
   const fullscreen = useRoom((s) => s.ui.fullscreen);
@@ -93,10 +97,31 @@ export default function RoomPage() {
     setGlobalDragging(false);
 
     const files = Array.from(e.dataTransfer.files);
+    const audioFiles = files.filter(isAudioDropCandidate);
+    const lrc = files.find((f) => f.name.toLowerCase().endsWith('.lrc'));
     const video = files.find(
       (f) => f.type.startsWith('video/') || /\.(mp4|m4v|mkv|webm|mov|avi|ts|flv|wmv)$/i.test(f.name),
     );
     const sub = files.find((f) => /\.(srt|vtt)$/i.test(f.name));
+
+    if (audioFiles.length > 0) {
+      void controller.addLocalMusicFiles(audioFiles);
+      toast.success(
+        audioFiles.length === 1
+          ? `Added "${audioFiles[0].name}" to Music Lounge`
+          : `Added ${audioFiles.length} tracks to Music Lounge`,
+      );
+    }
+
+    if (lrc) {
+      const activeId = useRoom.getState().musicActiveId;
+      if (activeId) {
+        void lrc.text().then((txt) => {
+          controller.setMusicLrc(activeId, txt);
+          toast.success(`Lyrics "${lrc.name}" attached`);
+        });
+      }
+    }
 
     if (video) {
       const url = URL.createObjectURL(video);
@@ -372,6 +397,28 @@ export default function RoomPage() {
         {/* Top Bar (Shown in Normal View) */}
         {!isImmersive && <TopBar />}
 
+        {/* Mobile-Only Room Identity Strip (keeps TopBar uncluttered while showing whose room this is) */}
+        {!isImmersive && (storeRoomInfo?.name || roomInfo?.name) && (
+          <div className="relative z-20 flex sm:hidden items-center justify-between gap-2 px-3 pb-1 text-[11px]">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-display font-semibold text-white/90 truncate">
+                {storeRoomInfo?.name || roomInfo?.name}
+              </span>
+              {me?.role === 'host' && (
+                <span className="shrink-0 rounded bg-coral-500/20 px-1.5 py-0.5 text-[9px] font-bold text-coral-300 ring-1 ring-coral-500/30">
+                  Host
+                </span>
+              )}
+            </div>
+            {people.length > 0 && (
+              <span className="shrink-0 inline-flex items-center gap-1 text-[10px] text-white/60">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {people.length} watching
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Center Main Stage + Right Panel */}
         <main
           className={cn(
@@ -401,6 +448,8 @@ export default function RoomPage() {
                 <YouTubeStage />
               ) : mode === 'local' ? (
                 <LocalStage />
+              ) : mode === 'music' ? (
+                <MusicStage />
               ) : (
                 <ScreenStage />
               )}

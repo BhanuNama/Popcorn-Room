@@ -5,6 +5,7 @@ import {
   type ChatGif,
   type ChatReply,
   type KnockRequestInfo,
+  type MusicTrackItem,
   type PublicRoomInfo,
   type QueueItem,
   type ReactionMark,
@@ -157,6 +158,10 @@ export interface RoomState {
   duck: number;
   consent: { kind: 'mic' | 'camera' | 'screen'; resolve: (ok: boolean) => void } | null;
   localMovie: LocalMovieState;
+  musicQueue: MusicTrackItem[];
+  musicActiveId: string | null;
+  musicLocalUrls: Record<string, string>;
+  musicProgress: Record<string, number>;
   ambient: AmbientColors | null;
 
   set: (p: Partial<RoomState>) => void;
@@ -232,6 +237,10 @@ const initial = () => ({
     duration: null,
     subtitles: null,
   },
+  musicQueue: [] as MusicTrackItem[],
+  musicActiveId: null as string | null,
+  musicLocalUrls: {} as Record<string, string>,
+  musicProgress: {} as Record<string, number>,
   ambient: null,
 });
 

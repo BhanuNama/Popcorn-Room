@@ -25,7 +25,7 @@ export function patchPublisherBitrateSdp(room: Room, startKbps = 5000, minKbps =
   }
 }
 
-function mungeVideoBitrate(sdp: string, startKbps: number, minKbps: number, maxKbps: number): string {
+export function mungeVideoBitrate(sdp: string, startKbps: number, minKbps: number, maxKbps: number): string {
   const lines = sdp.split('\r\n');
   let inVideo = false;
   const videoPayloads = new Set<string>();

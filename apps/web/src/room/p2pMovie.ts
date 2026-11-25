@@ -45,10 +45,24 @@ interface HostPeer {
 
 export interface P2PMovieCallbacks {
   send: (msg: DataMessage, to?: string) => void;
+  getSelfId: () => string | null;
   getGuestIds: () => string[];
   onHostFallback: () => void;
   onGuestFallback: () => void;
   onGuestStateChange: (active: boolean) => void;
+}
+
+const SWARM_DEGREE = 2; // Binary tree: host uploads to at most 2 guests (O(1) host upload)
+const SWARM_MEDIA_CACHE_BYTES = 8 * 1024 * 1024;
+const SWARM_DIRECT_RESCUE_MS = 2800;
+
+function computeSwarmChildren(selfId: string | null, hostId: string | null, peers: string[]): string[] {
+  if (!selfId || !hostId) return [];
+  if (selfId === hostId) return peers.slice(0, SWARM_DEGREE);
+  const idx = peers.indexOf(selfId);
+  if (idx < 0) return [];
+  const start = idx * SWARM_DEGREE + SWARM_DEGREE;
+  return peers.slice(start, start + SWARM_DEGREE);
 }
 
 export function isP2PMovieCandidate(file: File): boolean {
@@ -90,6 +104,8 @@ export class P2PMovieManager {
   private readPumpTimer: number | null = null;
 
   // Guest state
+  private guestHostId: string | null = null;
+  private guestUpstreamId: string | null = null;
   private guestPc: RTCPeerConnection | null = null;
   private guestDc: RTCDataChannel | null = null;
   private guestPendingIce: RTCIceCandidateInit[] = [];
@@ -101,9 +117,19 @@ export class P2PMovieManager {
   private reassembly = new Map<number, { total: number; received: number; parts: Uint8Array[] }>();
   private guestFlowPaused = false;
   private guestTimeoutTimer: number | null = null;
+  private relayRescueTimer: number | null = null;
   private guestFallbackTriggered = false;
   private guestActive = false;
   private guestTimeUpdateHandler: (() => void) | null = null;
+
+  // Swarm tree relay state (used by Guests to forward segments to downstream children)
+  private swarmPeers: string[] = [];
+  private directRescuedPeers = new Set<string>();
+  private relayChildren = new Map<string, HostPeer>();
+  private relayTracksPkt: ArrayBuffer | null = null;
+  private relayInitPkts: ArrayBuffer[] = [];
+  private relayMediaPkts: ArrayBuffer[] = [];
+  private relayMediaCacheBytes = 0;
 
   constructor(callbacks: P2PMovieCallbacks) {
     this.cb = callbacks;
@@ -115,6 +141,15 @@ export class P2PMovieManager {
 
   isGuestActive(): boolean {
     return this.guestActive;
+  }
+
+  getRelayChildCount(): number {
+    let open = 0;
+    const peers = this.isHostActive() ? this.hostPeers : this.relayChildren;
+    for (const p of peers.values()) {
+      if (p.dc?.readyState === 'open') open++;
+    }
+    return open;
   }
 
   // ---------------------------------------------------------------------------
@@ -180,7 +215,11 @@ export class P2PMovieManager {
         this.triggerHostFallback();
         return;
       }
-      console.info('[P2P Movie] Host mp4 ready:', this.hostTracks, 'guests:', this.cb.getGuestIds());
+      const guests = this.cb.getGuestIds().slice().sort();
+      this.swarmPeers = guests;
+      this.directRescuedPeers.clear();
+      const selfId = this.cb.getSelfId();
+      console.info('[P2P Movie] Host mp4 ready:', this.hostTracks, 'swarm:', guests);
 
       // Reset read cursor to sample 0's mdat offset so moov-at-end or pre-moov mdat
       // is never skipped, and defer mp4.start() until a peer DataChannel opens.
@@ -195,8 +234,12 @@ export class P2PMovieManager {
         fileSize: file.size,
         duration: this.hostDuration,
       });
+      if (selfId) {
+        this.cb.send({ t: 'p2p-swarm', hostId: selfId, peers: guests });
+      }
 
-      for (const peerId of this.cb.getGuestIds()) {
+      const directChildren = guests.slice(0, SWARM_DEGREE);
+      for (const peerId of directChildren) {
         void this.connectPeer(peerId);
       }
     };
@@ -299,6 +342,28 @@ export class P2PMovieManager {
       );
     } catch {
       this.triggerHostFallback();
+    }
+  }
+
+  /** Updates swarm tree when a guest joins or leaves mid-movie without exceeding O(1) host upload. */
+  syncSwarmTopology(): void {
+    if (!this.hostFile || this.hostFallbackTriggered || this.hostTracks.length === 0) return;
+    const guests = this.cb.getGuestIds().slice().sort();
+    this.swarmPeers = guests;
+    const selfId = this.cb.getSelfId();
+    if (selfId) {
+      this.cb.send({ t: 'p2p-swarm', hostId: selfId, peers: guests });
+    }
+    const desired = new Set([...guests.slice(0, SWARM_DEGREE), ...this.directRescuedPeers].filter((id) => guests.includes(id)));
+    for (const peerId of desired) {
+      if (!this.hostPeers.has(peerId)) {
+        void this.connectPeer(peerId);
+      }
+    }
+    for (const peerId of [...this.hostPeers.keys()]) {
+      if (!desired.has(peerId)) {
+        this.closeHostPeer(peerId);
+      }
     }
   }
 
@@ -548,6 +613,7 @@ export class P2PMovieManager {
     switch (msg.t) {
       case 'p2p-ready': {
         this.resetGuest();
+        this.guestHostId = fromId;
         if (typeof MediaSource === 'undefined') {
           this.triggerGuestFallback();
           return;
@@ -555,12 +621,37 @@ export class P2PMovieManager {
         this.startGuestTimeout();
         break;
       }
+      case 'p2p-swarm': {
+        if (this.isHostActive()) break;
+        this.guestHostId = msg.hostId;
+        this.swarmPeers = msg.peers;
+        this.updateGuestRelayChildren(msg.hostId, msg.peers);
+        // Rescue timer: if a child node's relay parent fails to connect quickly, request direct from host
+        const selfId = this.cb.getSelfId();
+        const myIdx = selfId ? msg.peers.indexOf(selfId) : -1;
+        if (myIdx >= SWARM_DEGREE && this.guestDc?.readyState !== 'open') {
+          if (this.relayRescueTimer !== null) window.clearTimeout(this.relayRescueTimer);
+          this.relayRescueTimer = window.setTimeout(() => {
+            this.relayRescueTimer = null;
+            if (this.guestDc?.readyState !== 'open' && !this.guestFallbackTriggered) {
+              this.cb.send({ t: 'p2p-need-direct' }, msg.hostId);
+            }
+          }, SWARM_DIRECT_RESCUE_MS);
+        }
+        break;
+      }
+      case 'p2p-need-direct': {
+        if (!this.isHostActive()) break;
+        this.directRescuedPeers.add(fromId);
+        void this.connectPeer(fromId);
+        break;
+      }
       case 'p2p-offer': {
         await this.handleGuestOffer(fromId, msg.sdp);
         break;
       }
       case 'p2p-answer': {
-        const peer = this.hostPeers.get(fromId);
+        const peer = this.hostPeers.get(fromId) ?? this.relayChildren.get(fromId);
         if (!peer) return;
         await peer.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
         for (const cand of peer.pendingIce) {
@@ -570,7 +661,7 @@ export class P2PMovieManager {
         break;
       }
       case 'p2p-ice': {
-        const peer = this.hostPeers.get(fromId);
+        const peer = this.hostPeers.get(fromId) ?? this.relayChildren.get(fromId);
         if (peer) {
           if (peer.pc.remoteDescription) {
             await peer.pc.addIceCandidate(msg.candidate);
@@ -612,9 +703,21 @@ export class P2PMovieManager {
   }
 
   private async handleGuestOffer(hostId: string, sdp: string): Promise<void> {
-    if (this.guestPc) {
+    if (this.guestPc && this.guestUpstreamId !== hostId) {
+      // Switching upstream relay parent (e.g. parent left or direct rescue)
+      try {
+        this.guestDc?.close();
+      } catch {}
+      try {
+        this.guestPc.close();
+      } catch {}
+      this.guestPc = null;
+      this.guestDc = null;
+      this.guestPendingIce = [];
+    } else if (this.guestPc) {
       this.resetGuest();
     }
+    this.guestUpstreamId = hostId;
     if (typeof MediaSource === 'undefined') {
       this.triggerGuestFallback();
       return;
@@ -639,7 +742,12 @@ export class P2PMovieManager {
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed') {
-        this.triggerGuestFallback();
+        if (this.guestHostId && hostId !== this.guestHostId) {
+          // Relay parent died -> request direct stream from host before falling back
+          this.cb.send({ t: 'p2p-need-direct' }, this.guestHostId);
+        } else {
+          this.triggerGuestFallback();
+        }
       }
     };
 
@@ -647,10 +755,17 @@ export class P2PMovieManager {
       const dc = ev.channel;
       dc.binaryType = 'arraybuffer';
       this.guestDc = dc;
+      if (this.relayRescueTimer !== null) {
+        window.clearTimeout(this.relayRescueTimer);
+        this.relayRescueTimer = null;
+      }
 
       dc.onmessage = (msgEv) => {
         if (typeof msgEv.data === 'string') return;
-        this.handleGuestPacket(new Uint8Array(msgEv.data as ArrayBuffer));
+        const ab = msgEv.data as ArrayBuffer;
+        const bytes = new Uint8Array(ab);
+        this.relayPacketToChildren(bytes);
+        this.handleGuestPacket(bytes);
       };
       dc.onclose = () => {
         if (!this.guestFallbackTriggered && this.guestActive) {
@@ -943,11 +1058,144 @@ export class P2PMovieManager {
     this.cb.onGuestFallback();
   }
 
+  // ---------------------------------------------------------------------------
+  // Guest Tree Relay (BitTorrent-style downstream segment fanout)
+  // ---------------------------------------------------------------------------
+
+  private updateGuestRelayChildren(hostId: string, peers: string[]): void {
+    const selfId = this.cb.getSelfId();
+    const desired = new Set(computeSwarmChildren(selfId, hostId, peers));
+    for (const [id, child] of this.relayChildren) {
+      if (!desired.has(id)) {
+        this.relayChildren.delete(id);
+        try { child.dc?.close(); } catch {}
+        try { child.pc.close(); } catch {}
+      }
+    }
+    for (const childId of desired) {
+      if (!this.relayChildren.has(childId)) {
+        void this.connectRelayChild(childId);
+      }
+    }
+  }
+
+  private async connectRelayChild(childId: string): Promise<void> {
+    if (this.relayChildren.has(childId)) return;
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const child: HostPeer = {
+      id: childId,
+      pc,
+      dc: null,
+      pausedByGuest: false,
+      initSent: false,
+      pendingIce: [],
+    };
+    this.relayChildren.set(childId, child);
+
+    const dc = pc.createDataChannel('orbit-movie', { ordered: true });
+    dc.binaryType = 'arraybuffer';
+    child.dc = dc;
+
+    dc.onopen = () => {
+      child.initSent = true;
+      if (this.relayTracksPkt) {
+        try { dc.send(this.relayTracksPkt); } catch {}
+      }
+      for (const initPkt of this.relayInitPkts) {
+        try { dc.send(initPkt); } catch {}
+      }
+      for (const mediaPkt of this.relayMediaPkts) {
+        if (dc.bufferedAmount > DC_HIGH_WATER * 1.5) break;
+        try { dc.send(mediaPkt); } catch {}
+      }
+    };
+
+    pc.onicecandidate = (ev) => {
+      if (ev.candidate) {
+        this.cb.send({ t: 'p2p-ice', to: childId, candidate: ev.candidate.toJSON() }, childId);
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        this.relayChildren.delete(childId);
+        try { dc.close(); } catch {}
+        try { pc.close(); } catch {}
+      }
+    };
+
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      if (!offer.sdp || !this.relayChildren.has(childId)) return;
+      this.cb.send(
+        { t: 'p2p-offer', to: childId, sdp: offer.sdp, fileName: 'swarm', fileSize: 0 },
+        childId,
+      );
+    } catch {
+      this.relayChildren.delete(childId);
+      try { pc.close(); } catch {}
+    }
+  }
+
+  private relayPacketToChildren(pkt: Uint8Array): void {
+    const type = pkt[0];
+    const copy = pkt.slice().buffer;
+
+    if (type === MSG_CONTROL) {
+      try {
+        const ctrl = JSON.parse(new TextDecoder().decode(pkt.subarray(1))) as ControlPayload;
+        if (ctrl.kind === 'tracks') {
+          this.relayTracksPkt = copy;
+          this.relayInitPkts = [];
+          this.relayMediaPkts = [];
+          this.relayMediaCacheBytes = 0;
+        } else if (ctrl.kind === 'seek') {
+          this.relayMediaPkts = [];
+          this.relayMediaCacheBytes = 0;
+        }
+      } catch {}
+    } else if (type === MSG_INIT) {
+      this.relayInitPkts.push(copy);
+    } else if (type === MSG_MEDIA) {
+      this.relayMediaPkts.push(copy);
+      this.relayMediaCacheBytes += copy.byteLength;
+      while (this.relayMediaCacheBytes > SWARM_MEDIA_CACHE_BYTES && this.relayMediaPkts.length > 0) {
+        const removed = this.relayMediaPkts.shift()!;
+        this.relayMediaCacheBytes -= removed.byteLength;
+      }
+    }
+
+    for (const child of this.relayChildren.values()) {
+      if (child.dc?.readyState === 'open' && child.dc.bufferedAmount < DC_HIGH_WATER * 1.5) {
+        try {
+          child.dc.send(copy);
+        } catch {
+          // Ignore closing child channel
+        }
+      }
+    }
+  }
+
   resetGuest(): void {
     if (this.guestTimeoutTimer !== null) {
       window.clearTimeout(this.guestTimeoutTimer);
       this.guestTimeoutTimer = null;
     }
+    if (this.relayRescueTimer !== null) {
+      window.clearTimeout(this.relayRescueTimer);
+      this.relayRescueTimer = null;
+    }
+    for (const child of this.relayChildren.values()) {
+      try { child.dc?.close(); } catch {}
+      try { child.pc.close(); } catch {}
+    }
+    this.relayChildren.clear();
+    this.relayTracksPkt = null;
+    this.relayInitPkts = [];
+    this.relayMediaPkts = [];
+    this.relayMediaCacheBytes = 0;
+    this.guestHostId = null;
+    this.guestUpstreamId = null;
     this.guestFallbackTriggered = false;
     this.guestFlowPaused = false;
     this.reassembly.clear();

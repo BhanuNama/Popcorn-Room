@@ -14,9 +14,11 @@ import {
   WifiOff,
   Film,
   Upload,
+  Music,
 } from 'lucide-react';
 import { YoutubeIcon } from './YoutubeIcon';
 import { controller } from '@/room/controller';
+import { isAudioDropCandidate } from '@/room/p2pAudio';
 import { caps } from '@/lib/browser';
 import { useRoom } from '@/store/room';
 import { AmbientGlow } from './AmbientGlow';
@@ -39,6 +41,7 @@ export function ScreenStage() {
   const duck = useRoom((s) => s.duck);
   const [sharerName, setSharerName] = useState<string>('');
   const [hasVideo, setHasVideo] = useState(false);
+  const [isDirectP2p, setIsDirectP2p] = useState(false);
   const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
   const [showHostPreview, setShowHostPreview] = useState(true);
 
@@ -59,6 +62,54 @@ export function ScreenStage() {
 
     const attachSharer = () => {
       if (!videoEl) return;
+
+      // 0a. Check Direct P2P Host preview stream (2-person fast-path)
+      const directHost = controller.p2pScreen.getHostStream();
+      if (directHost) {
+        if (attachedVideo) { attachedVideo.detach(videoEl); attachedVideo = null; }
+        if (attachedAudio) { attachedAudio.detach(videoEl); attachedAudio = null; }
+        videoEl.muted = true;
+        if (videoEl.srcObject !== directHost) videoEl.srcObject = directHost;
+        setSharerName('You (Presenting)');
+        setRemoteAudioBlocked(false);
+        setIsDirectP2p(true);
+        setHasVideo(true);
+        return;
+      }
+
+      // 0b. Check Direct P2P Guest incoming stream (2-person fast-path)
+      const directGuest = controller.p2pScreen.getGuestStream();
+      if (directGuest) {
+        if (attachedVideo) { attachedVideo.detach(videoEl); attachedVideo = null; }
+        if (attachedAudio) { attachedAudio.detach(videoEl); attachedAudio = null; }
+        const hasAudioTrack = directGuest.stream.getAudioTracks().length > 0;
+        if (videoEl.srcObject !== directGuest.stream) {
+          videoEl.srcObject = directGuest.stream;
+        }
+        if (hasAudioTrack) {
+          videoEl.muted = false;
+          videoEl.volume = Math.max(0, Math.min(1, useRoom.getState().audio.streamVolume * useRoom.getState().duck));
+        } else {
+          videoEl.muted = true;
+        }
+        if (videoEl.paused) {
+          void videoEl.play().catch((err) => {
+            if (err?.name === 'NotAllowedError') {
+              videoEl.muted = true;
+              setRemoteAudioBlocked(true);
+              void videoEl.play().catch(() => {});
+            }
+          });
+        }
+        const sharer = room.remoteParticipants.get(directGuest.sharerId);
+        setRemoteAudioBlocked(Boolean(hasAudioTrack && videoEl.muted));
+        setSharerName(sharer?.name || directGuest.sharerId);
+        setIsDirectP2p(true);
+        setHasVideo(true);
+        return;
+      }
+
+      setIsDirectP2p(false);
 
       // 1. Check local presenter preview (must stay muted so presenter hears original tab without echo)
       if (room.localParticipant.isScreenShareEnabled) {
@@ -154,14 +205,17 @@ export function ScreenStage() {
     room.on('trackUnsubscribed', onTrackUnsubscribed);
     room.on('localTrackPublished', attachSharer);
     room.on('localTrackUnpublished', attachSharer);
+    const unsubDirect = controller.onP2PScreenChange(attachSharer);
 
     return () => {
       room.off('trackSubscribed', onTrackSubscribed);
       room.off('trackUnsubscribed', onTrackUnsubscribed);
       room.off('localTrackPublished', attachSharer);
       room.off('localTrackUnpublished', attachSharer);
+      unsubDirect();
       if (attachedVideo && videoEl) attachedVideo.detach(videoEl);
       if (attachedAudio && videoEl) attachedAudio.detach(videoEl);
+      if (!attachedVideo && !attachedAudio && videoEl) videoEl.srcObject = null;
     };
   }, [localSharing, videoElState]);
 
@@ -177,6 +231,11 @@ export function ScreenStage() {
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files);
+    const audioFiles = files.filter(isAudioDropCandidate);
+    if (audioFiles.length > 0) {
+      void controller.addLocalMusicFiles(audioFiles);
+      return;
+    }
     const video = files.find(
       (f) => f.type.startsWith('video/') || /\.(mp4|m4v|mkv|webm|mov|avi|ts|flv|wmv)$/i.test(f.name),
     );
@@ -197,7 +256,7 @@ export function ScreenStage() {
       ref={containerRef}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      className="group relative flex h-full w-full items-center justify-center overflow-hidden rounded-2xl p-1 sm:p-2"
+      className="group relative flex h-full w-full items-center justify-center overflow-y-auto rounded-2xl p-2 sm:p-3"
     >
       {/* Ambient Glow behind remote video (skip on presenter to keep 100% GPU free for screen encoding) */}
       <AmbientGlow videoEl={videoElState} active={hasVideo && !localSharing} />
@@ -216,9 +275,11 @@ export function ScreenStage() {
             void controller.unlockAudio();
           }
         }}
-        className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${
-          !hasVideo || (localSharing && !showHostPreview) ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
-        }`}
+        className={
+          !hasVideo || (localSharing && !showHostPreview)
+            ? 'pointer-events-none absolute inset-0 h-0 w-0 opacity-0'
+            : 'relative z-10 block max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl'
+        }
       />
 
       {/* Lightweight zero-GPU Presenter Screen Share Console (avoids hall-of-mirrors & GPU contention) */}
@@ -283,6 +344,11 @@ export function ScreenStage() {
         <div className="absolute top-4 left-4 z-20 flex items-center gap-2 rounded-full bg-ink-950/80 px-3.5 py-1.5 text-xs font-semibold text-white shadow-float ring-1 ring-white/10 backdrop-blur-md">
           <span className="h-2 w-2 rounded-full bg-coral-500 animate-pulse" />
           <span>{sharerName}</span>
+          {isDirectP2p && (
+            <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+              Direct P2P
+            </span>
+          )}
         </div>
       )}
 
@@ -358,78 +424,95 @@ export function ScreenStage() {
 
       {/* Atmospheric Orbital Screening Lounge Empty State */}
       {!hasVideo && (
-        <div className="relative z-10 flex w-full max-w-2xl flex-col items-center justify-center p-5 sm:p-8 text-center text-white">
+        <div className="relative z-10 my-auto flex w-full max-w-2xl flex-col items-center justify-center px-3 py-3 sm:p-6 text-center text-white">
           {/* Concentric glowing orbital rings behind stage center */}
           <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
-            <div className="animate-orbit-slow h-72 w-72 sm:h-96 sm:w-96 rounded-full border border-white/[0.06]">
+            <div className="animate-orbit-slow h-56 w-56 sm:h-80 sm:w-80 rounded-full border border-white/[0.06]">
               <span className="absolute -top-1 left-1/2 h-2 w-2 rounded-full bg-amber-300/80 shadow-[0_0_12px_rgba(251,191,36,0.7)]" />
             </div>
-            <div className="animate-orbit-rev absolute h-48 w-48 sm:h-64 sm:w-64 rounded-full border border-dashed border-coral-400/20">
+            <div className="animate-orbit-rev absolute h-40 w-40 sm:h-56 sm:w-56 rounded-full border border-dashed border-coral-400/20">
               <span className="absolute bottom-0 left-1/2 h-1.5 w-1.5 rounded-full bg-coral-400" />
             </div>
           </div>
 
-          <div className="relative mb-5">
-            <div className="absolute -inset-4 rounded-full bg-coral-500/20 blur-2xl" />
-            <div className="animate-float-gentle relative grid h-16 w-16 sm:h-20 sm:w-20 place-items-center rounded-3xl bg-white/[0.08] ring-1 ring-white/15 backdrop-blur-xl shadow-float">
-              <MonitorUp size={30} className="text-coral-300" />
+          <div className="relative mb-3 sm:mb-4">
+            <div className="absolute -inset-3 rounded-full bg-coral-500/20 blur-2xl" />
+            <div className="animate-float-gentle relative grid h-12 w-12 sm:h-16 sm:w-16 place-items-center rounded-2xl sm:rounded-3xl bg-white/[0.08] ring-1 ring-white/15 backdrop-blur-xl shadow-float">
+              <MonitorUp size={24} className="text-coral-300 sm:h-7 sm:w-7" />
             </div>
           </div>
 
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.07] px-3 py-1 text-[11px] font-medium text-white/70 ring-1 ring-white/10 mb-3">
-            <Sparkles size={12} className="text-amber-300" />
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-white/[0.07] px-3 py-1 text-[10px] sm:text-[11px] font-medium text-white/70 ring-1 ring-white/10 mb-2">
+            <Sparkles size={11} className="text-amber-300" />
             <span>The Orbit · Watch Together</span>
           </div>
 
-          <h2 className="font-display text-xl font-bold tracking-tight text-white sm:text-3xl">
+          <h2 className="font-display text-lg font-bold tracking-tight text-white sm:text-2xl lg:text-3xl">
             Pick what everyone watches together
           </h2>
-          <p className="mt-2 max-w-md text-xs sm:text-sm text-white/55 leading-relaxed">
-            Share a browser tab in crisp stereo, watch YouTube in real-time lockstep, or drop any local video file straight onto the screen.
+          <p className="mt-1.5 max-w-md text-[11px] sm:text-sm text-white/55 leading-relaxed">
+            Share a tab in stereo, sync YouTube, stream 4K files P2P, or vibe in the Music Lounge.
           </p>
 
-          {/* 3-Card Interactive Launch Dock */}
+          {/* 4-Card Responsive Interactive Launch Dock (2x2 on mobile/tablet, 4 cols on lg+) */}
           <div
-            className={`mt-6 grid w-full grid-cols-1 gap-2.5 ${caps.canShareScreen ? 'sm:grid-cols-3' : 'sm:grid-cols-2 max-w-lg'}`}
+            className={`mt-4 sm:mt-6 grid w-full gap-2 sm:gap-2.5 ${
+              caps.canShareScreen
+                ? 'grid-cols-2 lg:grid-cols-4 max-w-lg lg:max-w-3xl'
+                : 'grid-cols-1 xs:grid-cols-3 sm:grid-cols-3 max-w-sm sm:max-w-2xl'
+            }`}
           >
             {caps.canShareScreen && (
               <button
                 onClick={() => controller.startShare()}
-                className="butter-btn group flex sm:flex-col items-center sm:items-start gap-3 sm:gap-2 rounded-2xl bg-coral-500/20 hover:bg-coral-500/30 p-3.5 sm:p-4 text-left ring-1 ring-coral-400/40 backdrop-blur-md"
+                className="butter-btn group flex flex-col items-start gap-2 rounded-2xl bg-coral-500/20 hover:bg-coral-500/30 p-3 sm:p-4 text-left ring-1 ring-coral-400/40 backdrop-blur-md"
               >
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-coral-500 text-white shadow">
-                  <MonitorUp size={17} />
+                <span className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-coral-500 text-white shadow">
+                  <MonitorUp size={16} />
                 </span>
                 <div>
                   <div className="text-xs font-bold text-white">Share Screen</div>
-                  <div className="text-[11px] text-white/60 mt-0.5">60 fps · Stereo audio</div>
+                  <div className="text-[10px] sm:text-[11px] text-white/60 mt-0.5">60 fps · P2P / SFU</div>
                 </div>
               </button>
             )}
 
             <button
               onClick={() => useRoom.getState().setUi({ youtubeDialog: true })}
-              className="butter-btn group flex sm:flex-col items-center sm:items-start gap-3 sm:gap-2 rounded-2xl bg-white/[0.06] hover:bg-white/[0.11] p-3.5 sm:p-4 text-left ring-1 ring-white/10 backdrop-blur-md"
+              className="butter-btn group flex flex-col items-start gap-2 rounded-2xl bg-white/[0.06] hover:bg-white/[0.11] p-3 sm:p-4 text-left ring-1 ring-white/10 backdrop-blur-md"
             >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-red-500/20 text-red-400 ring-1 ring-red-500/30">
-                <YoutubeIcon size={17} />
+              <span className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-red-500/20 text-red-400 ring-1 ring-red-500/30">
+                <YoutubeIcon size={16} />
               </span>
               <div>
                 <div className="text-xs font-bold text-white">YouTube Sync</div>
-                <div className="text-[11px] text-white/55 mt-0.5">Paste URL · Queue</div>
+                <div className="text-[10px] sm:text-[11px] text-white/55 mt-0.5">Paste URL · Queue</div>
               </div>
             </button>
 
             <button
               onClick={() => controller.setMode('local')}
-              className="butter-btn group flex sm:flex-col items-center sm:items-start gap-3 sm:gap-2 rounded-2xl bg-white/[0.06] hover:bg-white/[0.11] p-3.5 sm:p-4 text-left ring-1 ring-white/10 backdrop-blur-md"
+              className="butter-btn group flex flex-col items-start gap-2 rounded-2xl bg-white/[0.06] hover:bg-white/[0.11] p-3 sm:p-4 text-left ring-1 ring-white/10 backdrop-blur-md"
             >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/30">
-                <Film size={17} />
+              <span className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/30">
+                <Film size={16} />
               </span>
               <div>
                 <div className="text-xs font-bold text-white">Local 4K Drop</div>
-                <div className="text-[11px] text-white/55 mt-0.5">.mp4 / .mkv + subtitles</div>
+                <div className="text-[10px] sm:text-[11px] text-white/55 mt-0.5">.mp4 / .mkv · Swarm</div>
+              </div>
+            </button>
+
+            <button
+              onClick={() => controller.setMode('music')}
+              className="butter-btn group flex flex-col items-start gap-2 rounded-2xl bg-emerald-500/15 hover:bg-emerald-500/25 p-3 sm:p-4 text-left ring-1 ring-emerald-400/35 backdrop-blur-md"
+            >
+              <span className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-emerald-500/25 text-emerald-300 ring-1 ring-emerald-400/40">
+                <Music size={16} />
+              </span>
+              <div>
+                <div className="text-xs font-bold text-white">Music Lounge</div>
+                <div className="text-[10px] sm:text-[11px] text-white/60 mt-0.5">Hi-Fi Audio · Lo-Fi</div>
               </div>
             </button>
           </div>

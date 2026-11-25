@@ -26,11 +26,13 @@ import {
   expectedPosition,
   msUntilStart,
   parseMeta,
+  parseYouTubeId,
   sortQueue,
   type ChatGif,
   type ChatReply,
   type DataMessage,
   type JoinResponse,
+  type MusicTrackItem,
   type QueueItem,
   type ReactionMark,
   type RoomSettings,
@@ -39,12 +41,15 @@ import {
   type SyncState,
 } from '@popcorn/shared';
 import { api, type HostAuth } from '@/lib/api';
+import { extractAudioTags } from '@/lib/audioTags';
 import { caps } from '@/lib/browser';
 import { clock } from '@/lib/clock';
 import { loadPref, savePref, session } from '@/lib/session';
 import { uid } from '@/lib/utils';
 import { patchPublisherBitrateSdp, startBitrateAutopilot } from './bitrate';
+import { P2PAudioManager, isAudioDropCandidate } from './p2pAudio';
 import { P2PMovieManager } from './p2pMovie';
+import { DirectScreenShareManager } from './p2pScreen';
 import { canControl, roleRank, useRoom, type ChatMsg, type ChatToastItem, type PersonVM, type Quality } from '@/store/room';
 
 type JoinOk = Extract<JoinResponse, { status: 'ok' }>;
@@ -128,14 +133,50 @@ class RoomController {
   private p2pHostFallbackListeners = new Set<() => void>();
   private p2pGuestStateListeners = new Set<(active: boolean) => void>();
   private p2pGuestFallbackListeners = new Set<() => void>();
+  private p2pScreenListeners = new Set<() => void>();
+  private p2pScreenShareBitrate = 10_000_000;
+  private p2pScreenShareFps = 60;
 
   readonly p2pMovie = new P2PMovieManager({
     send: (msg, to) => void this.send(msg, to ? [to] : undefined),
+    getSelfId: () => this.room?.localParticipant.identity ?? null,
     getGuestIds: () => [...(this.room?.remoteParticipants.keys() ?? [])],
     onHostFallback: () => this.p2pHostFallbackListeners.forEach((fn) => fn()),
     onGuestFallback: () => this.p2pGuestFallbackListeners.forEach((fn) => fn()),
     onGuestStateChange: (active) => this.p2pGuestStateListeners.forEach((fn) => fn(active)),
   });
+
+  readonly p2pScreen = new DirectScreenShareManager({
+    send: (msg, to) => void this.send(msg, to ? [to] : undefined),
+    onHostStreamChange: () => this.p2pScreenListeners.forEach((fn) => fn()),
+    onGuestStreamChange: () => this.p2pScreenListeners.forEach((fn) => fn()),
+    onHostPromoteToSfu: (stream) => {
+      void this.publishScreenStreamToSfu(stream, this.p2pScreenShareBitrate, this.p2pScreenShareFps);
+    },
+  });
+
+  readonly p2pAudio = new P2PAudioManager({
+    send: (msg, to) => void this.send(msg, to ? [to] : undefined),
+    getGuestIds: () => [...(this.room?.remoteParticipants.keys() ?? [])],
+    onGuestAudioReady: (trackId, url) => {
+      useRoom.setState((s) => ({
+        musicLocalUrls: { ...s.musicLocalUrls, [trackId]: url },
+        musicProgress: { ...s.musicProgress, [trackId]: 100 },
+      }));
+    },
+    onGuestProgress: (trackId, pct) => {
+      useRoom.setState((s) => ({
+        musicProgress: { ...s.musicProgress, [trackId]: pct },
+      }));
+    },
+  });
+
+  onP2PScreenChange(fn: () => void): () => void {
+    this.p2pScreenListeners.add(fn);
+    return () => {
+      this.p2pScreenListeners.delete(fn);
+    };
+  }
 
   onP2PMovieEvents(handlers: {
     onHostFallback?: () => void;
@@ -222,6 +263,8 @@ class RoomController {
     this.stopShareAutopilot?.();
     this.stopShareAutopilot = null;
     this.p2pMovie.destroy();
+    this.p2pScreen.destroy();
+    this.p2pAudio.destroy();
     this.stopLocalAudioMonitor();
     this.stopBlackFrameDetector();
     await this.stopLocalMovieStream();
@@ -249,6 +292,9 @@ class RoomController {
       .on(RoomEvent.ParticipantDisconnected, (p) => {
         this.presence.delete(p.identity);
         this.onBufferingChanged(p.identity, false);
+        if (this.p2pMovie.isHostActive()) {
+          this.p2pMovie.syncSwarmTopology();
+        }
         refresh();
       })
       .on(RoomEvent.TrackSubscribed, (track, pub, p) => {
@@ -405,11 +451,22 @@ class RoomController {
   }
 
   private onParticipantJoined(p: RemoteParticipant) {
-    const { local } = useRoom.getState();
+    const { local, musicQueue, musicActiveId } = useRoom.getState();
     this.send({ t: 'presence', hand: local.hand, ready: local.ready, buffering: false }, [p.identity]);
-    if (this.isAuthority()) this.send(this.snapshot(), [p.identity]);
+    if (this.isAuthority()) {
+      this.send(this.snapshot(), [p.identity]);
+      if (musicQueue.length > 0) {
+        void this.send({ t: 'music-queue', tracks: musicQueue, activeId: musicActiveId }, [p.identity]);
+      }
+    }
     if (this.p2pMovie.isHostActive()) {
-      void this.p2pMovie.connectPeer(p.identity);
+      this.p2pMovie.syncSwarmTopology();
+    }
+    if (this.p2pScreen.isHostActive() && (this.room?.remoteParticipants.size ?? 0) >= 2) {
+      this.p2pScreen.promoteHostToSfu();
+    }
+    if (musicActiveId && this.p2pAudio.hasHostFile(musicActiveId)) {
+      void this.p2pAudio.sendActiveToNewPeer(p.identity);
     }
   }
 
@@ -556,6 +613,8 @@ class RoomController {
         });
         break;
       case 'p2p-ready':
+      case 'p2p-swarm':
+      case 'p2p-need-direct':
       case 'p2p-fallback':
         void this.p2pMovie.handleSignal(p.identity, m);
         break;
@@ -564,6 +623,58 @@ class RoomController {
       case 'p2p-ice':
         if (m.to === this.room?.localParticipant.identity) {
           void this.p2pMovie.handleSignal(p.identity, m);
+        }
+        break;
+      case 'p2p-screen-stop':
+      case 'p2p-screen-fallback':
+        void this.p2pScreen.handleSignal(p.identity, m);
+        break;
+      case 'p2p-screen-offer':
+      case 'p2p-screen-answer':
+      case 'p2p-screen-ice':
+        if (m.to === this.room?.localParticipant.identity) {
+          void this.p2pScreen.handleSignal(p.identity, m);
+        }
+        break;
+      case 'music-queue':
+        useRoom.setState({ musicQueue: m.tracks, musicActiveId: m.activeId });
+        break;
+      case 'music-meta': {
+        useRoom.setState((s) => {
+          const exists = s.musicQueue.some((t) => t.id === m.trackId);
+          const item: MusicTrackItem = {
+            id: m.trackId,
+            title: m.title,
+            artist: m.artist,
+            source: m.source,
+            ytId: m.ytId,
+            fileName: m.fileName,
+            fileSize: m.fileSize,
+            duration: m.duration,
+            coverDataUrl: m.coverDataUrl,
+            lrc: m.lrc,
+            addedBy: p.identity,
+            addedByName: p.name || p.identity,
+          };
+          return {
+            musicActiveId: m.trackId,
+            musicQueue: exists
+              ? s.musicQueue.map((t) => (t.id === m.trackId ? { ...t, ...item, addedBy: t.addedBy, addedByName: t.addedByName } : t))
+              : [...s.musicQueue, item],
+          };
+        });
+        break;
+      }
+      case 'music-lrc':
+        useRoom.setState((s) => ({
+          musicQueue: s.musicQueue.map((t) => (t.id === m.trackId ? { ...t, lrc: m.lrc } : t)),
+        }));
+        break;
+      case 'music-p2p-offer':
+      case 'music-p2p-answer':
+      case 'music-p2p-ice':
+        if (m.to === this.room?.localParticipant.identity) {
+          void this.p2pAudio.handleSignal(p.identity, m);
         }
         break;
     }
@@ -1295,6 +1406,62 @@ class RoomController {
 
     const targetBitrate = share60 ? 10_000_000 : 6_500_000;
     const targetFps = share60 ? 60 : 30;
+    this.p2pScreenShareBitrate = targetBitrate;
+    this.p2pScreenShareFps = targetFps;
+    const remoteCount = this.room?.remoteParticipants.size ?? 0;
+
+    // Fast-path: for 2-person rooms, route Screen Share directly P2P (zero SFU round-trip).
+    // Automatically promotes seamlessly to LiveKit SFU Simulcast if a 3rd person joins or ICE fails.
+    if (remoteCount === 1 && navigator.mediaDevices?.getDisplayMedia) {
+      const targetPeerId = [...this.room!.remoteParticipants.keys()][0];
+      try {
+        const displayOpts: DisplayMediaStreamOptions & {
+          systemAudio?: 'include' | 'exclude';
+          selfBrowserSurface?: 'include' | 'exclude';
+          surfaceSwitching?: 'include' | 'exclude';
+        } = {
+          video: {
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: targetFps },
+          },
+          audio: SCREEN_AUDIO_CAPTURE as MediaTrackConstraints,
+          systemAudio: 'include',
+          selfBrowserSurface: 'exclude',
+          surfaceSwitching: 'include',
+        };
+        const stream = await navigator.mediaDevices.getDisplayMedia(displayOpts);
+        const vTrack = stream.getVideoTracks()[0];
+        if (vTrack) {
+          vTrack.contentHint = 'motion';
+          vTrack.addEventListener('ended', () => {
+            if (useRoom.getState().local.sharing) void this.stopShare();
+          });
+        }
+        await this.p2pScreen.startHost(stream, targetPeerId, { targetBitrate, targetFps });
+        useRoom.getState().setLocal({ sharing: true });
+        this.setMode('screen');
+
+        const hasAudio = stream.getAudioTracks().length > 0;
+        useRoom.getState().setWarnings({ noShareAudio: !hasAudio, blackFrame: false });
+        if (!hasAudio) {
+          toast.warning('No sound is being shared', {
+            description: caps.canShareAudio
+              ? 'Stop and share again, then tick "Also share tab audio" (or "Share system audio") in the picker.'
+              : 'This browser cannot share audio. Use Chrome or Edge.',
+            duration: 10000,
+          });
+        }
+        if (vTrack) this.startBlackFrameDetector(vTrack);
+        this.refreshPeople();
+        return;
+      } catch (e) {
+        const err = e as Error;
+        if (err.name === 'NotAllowedError') return;
+        // Fall through to LiveKit SFU capture if custom getDisplayMedia fails
+      }
+    }
+
     if (this.room) {
       patchPublisherBitrateSdp(this.room, 5000, 2500, 12000);
     }
@@ -1308,13 +1475,14 @@ class RoomController {
       selfBrowserSurface: 'exclude',
       surfaceSwitching: 'include',
     };
+    const useSimulcast = remoteCount >= 2;
     const publish: TrackPublishOptions = {
       audioPreset: { maxBitrate: 256_000 }, // pure transparent 256kbps stereo Opus
       forceStereo: true,
       dtx: false, // never stop sending in quiet scenes
       red: false, // RED must be disabled for stereo music
-      simulcast: false, // single clean stream
-      videoCodec: 'h264', // Single-stream hardware GPU encode/decode across Windows, Mac & mobile
+      simulcast: useSimulcast, // 3+ person rooms get multi-layer simulcast so mobile 4G steps down smoothly
+      videoCodec: 'h264', // Hardware GPU encode/decode across Windows, Mac & mobile
       backupCodec: false,
       screenShareEncoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
       degradationPreference: 'maintain-framerate', // keep smooth 60fps/30fps motion without stuttering
@@ -1370,8 +1538,186 @@ class RoomController {
   }
 
   async stopShare() {
+    this.p2pScreen.stopHost(true);
     await this.room?.localParticipant.setScreenShareEnabled(false);
+    // Clean up promoted screen tracks if published manually
+    const lp = this.room?.localParticipant;
+    if (lp) {
+      for (const pub of lp.trackPublications.values()) {
+        if (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio) {
+          if (pub.track) {
+            try { await lp.unpublishTrack(pub.track, true); } catch {}
+          }
+        }
+      }
+    }
     this.onLocalShareEnded();
+  }
+
+  private async publishScreenStreamToSfu(stream: MediaStream, targetBitrate: number, targetFps: number) {
+    const lp = this.room?.localParticipant;
+    if (!lp || !this.room) return;
+    patchPublisherBitrateSdp(this.room, 5000, 2500, 12000);
+    const vTrack = stream.getVideoTracks()[0];
+    const aTrack = stream.getAudioTracks()[0];
+    if (vTrack) {
+      const pub = await lp.publishTrack(vTrack, {
+        name: 'screen-video',
+        source: Track.Source.ScreenShare,
+        simulcast: (this.room.remoteParticipants.size ?? 0) >= 2,
+        videoCodec: 'h264',
+        backupCodec: false,
+        screenShareEncoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
+        degradationPreference: 'maintain-framerate',
+      });
+      if (pub.track?.sender) {
+        this.stopShareAutopilot?.();
+        this.stopShareAutopilot = startBitrateAutopilot(pub.track.sender, targetBitrate, targetFps);
+      }
+    }
+    if (aTrack) {
+      await lp.publishTrack(aTrack, {
+        name: 'screen-audio',
+        source: Track.Source.ScreenShareAudio,
+        audioPreset: { maxBitrate: 256_000 },
+        forceStereo: true,
+        dtx: false,
+        red: false,
+      });
+    }
+    this.refreshPeople();
+  }
+
+  /* ------------------------------ music lounge ------------------------------ */
+
+  async addLocalMusicFiles(files: File[]) {
+    const s = useRoom.getState();
+    const audioFiles = files.filter(isAudioDropCandidate);
+    if (audioFiles.length === 0) return;
+
+    const added: MusicTrackItem[] = [];
+    for (const file of audioFiles) {
+      const id = uid();
+      const tags = await extractAudioTags(file);
+      this.p2pAudio.registerHostFile(id, file);
+      const url = URL.createObjectURL(file);
+      useRoom.setState((st) => ({
+        musicLocalUrls: { ...st.musicLocalUrls, [id]: url },
+        musicProgress: { ...st.musicProgress, [id]: 100 },
+      }));
+      added.push({
+        id,
+        title: tags.title,
+        artist: tags.artist,
+        source: 'local',
+        fileName: file.name,
+        fileSize: file.size,
+        coverDataUrl: tags.coverDataUrl,
+        addedBy: s.me?.identity ?? 'host',
+        addedByName: s.me?.name ?? 'Host',
+      });
+    }
+
+    const nextQueue = [...useRoom.getState().musicQueue, ...added];
+    const shouldAutoPlay = !useRoom.getState().musicActiveId && added.length > 0;
+    useRoom.setState({ musicQueue: nextQueue });
+    void this.send({ t: 'music-queue', tracks: nextQueue, activeId: useRoom.getState().musicActiveId });
+    this.setMode('music');
+    if (shouldAutoPlay && added[0]) {
+      await this.playMusicTrack(added[0].id);
+    }
+  }
+
+  async addYouTubeMusicTrack(input: string) {
+    const ytId = parseYouTubeId(input);
+    if (!ytId) return false;
+    const s = useRoom.getState();
+    let title = 'YouTube Track';
+    let artist = 'YouTube Music';
+    try {
+      const o = await api.oembed(ytId);
+      if (o.title) title = o.title;
+      if (o.author) artist = o.author;
+    } catch {}
+    const item: MusicTrackItem = {
+      id: uid(),
+      title,
+      artist,
+      source: 'youtube',
+      ytId,
+      coverDataUrl: `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`,
+      addedBy: s.me?.identity ?? 'user',
+      addedByName: s.me?.name ?? 'Listener',
+    };
+    const nextQueue = [...s.musicQueue, item];
+    const shouldAutoPlay = !s.musicActiveId;
+    useRoom.setState({ musicQueue: nextQueue });
+    void this.send({ t: 'music-queue', tracks: nextQueue, activeId: s.musicActiveId });
+    this.setMode('music');
+    if (shouldAutoPlay) {
+      await this.playMusicTrack(item.id);
+    }
+    return true;
+  }
+
+  async playMusicTrack(trackId: string) {
+    const s = useRoom.getState();
+    const track = s.musicQueue.find((t) => t.id === trackId);
+    if (!track) return;
+    useRoom.setState({ musicActiveId: trackId });
+    this.setMode('music');
+    void this.send({ t: 'music-queue', tracks: s.musicQueue, activeId: trackId });
+    void this.send({
+      t: 'music-meta',
+      trackId: track.id,
+      title: track.title,
+      artist: track.artist,
+      source: track.source,
+      ytId: track.ytId,
+      fileName: track.fileName,
+      fileSize: track.fileSize,
+      duration: track.duration,
+      coverDataUrl: track.coverDataUrl,
+      lrc: track.lrc,
+    });
+    if (track.source === 'local' && this.p2pAudio.hasHostFile(trackId)) {
+      void this.p2pAudio.broadcastTrack(trackId);
+    }
+    if (canControl(useRoom.getState())) {
+      this.commitSync({
+        videoId: track.source === 'youtube' ? track.ytId ?? track.id : track.id,
+        status: 'playing',
+        position: 0,
+        rate: 1,
+        serverTime: clock.now() + 500,
+      });
+    }
+  }
+
+  removeMusicTrack(trackId: string) {
+    const s = useRoom.getState();
+    const nextQueue = s.musicQueue.filter((t) => t.id !== trackId);
+    const nextActive = s.musicActiveId === trackId ? nextQueue[0]?.id ?? null : s.musicActiveId;
+    useRoom.setState({ musicQueue: nextQueue, musicActiveId: nextActive });
+    void this.send({ t: 'music-queue', tracks: nextQueue, activeId: nextActive });
+    if (s.musicActiveId === trackId && nextActive) {
+      void this.playMusicTrack(nextActive);
+    }
+  }
+
+  stepMusicTrack(delta: 1 | -1) {
+    const s = useRoom.getState();
+    if (s.musicQueue.length === 0) return;
+    const idx = s.musicQueue.findIndex((t) => t.id === s.musicActiveId);
+    const nextIdx = (Math.max(0, idx) + delta + s.musicQueue.length) % s.musicQueue.length;
+    void this.playMusicTrack(s.musicQueue[nextIdx].id);
+  }
+
+  setMusicLrc(trackId: string, lrc: string) {
+    useRoom.setState((s) => ({
+      musicQueue: s.musicQueue.map((t) => (t.id === trackId ? { ...t, lrc } : t)),
+    }));
+    void this.send({ t: 'music-lrc', trackId, lrc });
   }
 
   /** Capture and stream the host's local <video> element live at native FPS and full clarity with parallel hardware H.264 + A/V lock. */
@@ -1514,10 +1860,10 @@ class RoomController {
   }
 
   /** DRM sites often produce a black picture: sample the outgoing frames and warn the host. */
-  private startBlackFrameDetector() {
+  private startBlackFrameDetector(explicitTrack?: MediaStreamTrack) {
     this.stopBlackFrameDetector();
     const pub = this.room?.localParticipant.getTrackPublication(Track.Source.ScreenShare);
-    const mst = pub?.track?.mediaStreamTrack;
+    const mst = explicitTrack ?? pub?.track?.mediaStreamTrack;
     if (!mst) return;
     const video = document.createElement('video');
     video.muted = true;

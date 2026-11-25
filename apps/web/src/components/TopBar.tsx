@@ -11,6 +11,7 @@ import {
   MonitorUp,
   MonitorOff,
   Film,
+  Music,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Logo } from './Logo';
@@ -54,13 +55,13 @@ export function TopBar() {
   };
 
   return (
-    <header className="relative z-30 flex h-13 sm:h-14 items-center justify-between gap-2 px-2.5 sm:px-4">
-      {/* Left: Brand, Room Name & Watching Badge */}
-      <div className="flex items-center gap-2 min-w-0">
-        <Logo dark className="scale-85 sm:scale-90 origin-left shrink-0 [&>span]:hidden sm:[&>span]:inline" />
+    <header className="relative z-30 flex h-12 sm:h-14 items-center justify-between gap-1.5 sm:gap-2 px-2 sm:px-4">
+      {/* Left: Brand, Room Name (sm+) & Watching Badge */}
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 shrink-0">
+        <Logo dark className="scale-80 sm:scale-90 origin-left shrink-0 [&>span]:hidden sm:[&>span]:inline" />
         <span className="h-4 w-px bg-white/10 hidden sm:block shrink-0" />
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="font-display text-xs sm:text-sm font-bold text-white truncate max-w-[95px] sm:max-w-[180px] lg:max-w-xs">
+        <div className="hidden sm:flex items-center gap-1.5 min-w-0">
+          <span className="font-display text-sm font-bold text-white truncate max-w-[140px] lg:max-w-xs">
             {roomInfo?.name || 'The Orbit'}
           </span>
           {people.length > 0 && (
@@ -70,7 +71,7 @@ export function TopBar() {
             </span>
           )}
           {me?.role === 'host' && (
-            <span className="hidden xs:inline-flex rounded-md bg-coral-500/20 px-1.5 py-0.5 text-[10px] font-bold text-coral-300 ring-1 ring-coral-500/30 shrink-0">
+            <span className="hidden lg:inline-flex rounded-md bg-coral-500/20 px-1.5 py-0.5 text-[10px] font-bold text-coral-300 ring-1 ring-coral-500/30 shrink-0">
               Host
             </span>
           )}
@@ -78,15 +79,15 @@ export function TopBar() {
       </div>
 
       {/* Center: Unified Stage Mode Switcher Dock + Audio Mixer */}
-      <div className="flex items-center gap-1.5">
-        <div className="flex items-center gap-0.5 rounded-2xl bg-white/[0.06] p-1 ring-1 ring-white/10 backdrop-blur-md">
+      <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+        <div className="flex items-center gap-0.5 rounded-2xl bg-white/[0.06] p-0.5 sm:p-1 ring-1 ring-white/10 backdrop-blur-md">
           {/* Screen Share */}
           {caps.canShareScreen && (
             <Tip label={local.sharing ? 'Stop Sharing Screen' : 'Share Screen with Stereo Audio'}>
               <button
                 onClick={() => controller.toggleShare()}
                 className={cn(
-                  'butter-btn flex h-8 items-center gap-1.5 rounded-xl px-2.5 sm:px-3 text-xs font-semibold',
+                  'butter-btn flex h-8 items-center gap-1.5 rounded-xl px-2 sm:px-3 text-xs font-semibold',
                   local.sharing
                     ? 'bg-coral-500 text-white shadow-glow hover:bg-coral-600'
                     : mode === 'screen'
@@ -131,6 +132,22 @@ export function TopBar() {
             >
               <Film size={14} className="text-amber-300" />
               <span className="hidden md:inline">Local Movie</span>
+            </button>
+          </Tip>
+
+          {/* Listen Together Music Lounge Mode */}
+          <Tip label="Music Lounge · Hi-Fi Drop & Lo-Fi">
+            <button
+              onClick={() => controller.setMode('music')}
+              className={cn(
+                'butter-btn flex h-8 items-center gap-1.5 rounded-xl px-2.5 sm:px-3 text-xs font-semibold',
+                mode === 'music'
+                  ? 'bg-emerald-500/25 text-emerald-200 ring-1 ring-emerald-400/40'
+                  : 'text-white/70 hover:bg-white/[0.08] hover:text-white',
+              )}
+            >
+              <Music size={14} className="text-emerald-300" />
+              <span className="hidden md:inline">Music</span>
             </button>
           </Tip>
         </div>

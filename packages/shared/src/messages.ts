@@ -1,9 +1,24 @@
 import type { SyncState } from './sync';
 
 /** What the centre stage shows. */
-export type StageMode = 'idle' | 'screen' | 'youtube' | 'local';
+export type StageMode = 'idle' | 'screen' | 'youtube' | 'local' | 'music';
 
 export type RoomTheme = 'midnight' | 'oled' | 'retro' | 'cyberpunk' | 'nordic' | 'sunset';
+
+export interface MusicTrackItem {
+  id: string;
+  title: string;
+  artist: string;
+  duration?: number;
+  source: 'local' | 'youtube';
+  ytId?: string;
+  fileName?: string;
+  fileSize?: number;
+  coverDataUrl?: string;
+  lrc?: string;
+  addedBy: string;
+  addedByName: string;
+}
 
 export interface QueueItem {
   id: string;
@@ -85,10 +100,35 @@ export type DataMessage =
   | { t: 'settings'; settings: RoomSettings }
   | { t: 'host-mute' }
   | { t: 'p2p-ready'; fileName: string; fileSize: number; duration?: number }
+  | { t: 'p2p-swarm'; hostId: string; peers: string[] }
+  | { t: 'p2p-need-direct' }
   | { t: 'p2p-offer'; to: string; sdp: string; fileName: string; fileSize: number }
   | { t: 'p2p-answer'; to: string; sdp: string }
   | { t: 'p2p-ice'; to: string; candidate: { candidate?: string; sdpMid?: string | null; sdpMLineIndex?: number | null } }
-  | { t: 'p2p-fallback' };
+  | { t: 'p2p-fallback' }
+  | { t: 'p2p-screen-offer'; to: string; sdp: string }
+  | { t: 'p2p-screen-answer'; to: string; sdp: string }
+  | { t: 'p2p-screen-ice'; to: string; candidate: { candidate?: string; sdpMid?: string | null; sdpMLineIndex?: number | null } }
+  | { t: 'p2p-screen-stop' }
+  | { t: 'p2p-screen-fallback' }
+  | {
+      t: 'music-meta';
+      trackId: string;
+      title: string;
+      artist: string;
+      source: 'local' | 'youtube';
+      ytId?: string;
+      fileName?: string;
+      fileSize?: number;
+      duration?: number;
+      coverDataUrl?: string;
+      lrc?: string;
+    }
+  | { t: 'music-queue'; tracks: MusicTrackItem[]; activeId: string | null }
+  | { t: 'music-lrc'; trackId: string; lrc: string }
+  | { t: 'music-p2p-offer'; to: string; sdp: string; trackId: string; fileName: string; fileSize: number; mime: string }
+  | { t: 'music-p2p-answer'; to: string; sdp: string }
+  | { t: 'music-p2p-ice'; to: string; candidate: { candidate?: string; sdpMid?: string | null; sdpMLineIndex?: number | null } };
 
 export const DATA_TOPIC = 'popcorn';
 
