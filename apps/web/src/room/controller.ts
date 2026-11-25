@@ -69,7 +69,6 @@ const SCREEN_AUDIO_CAPTURE: AudioCaptureOptions = {
   autoGainControl: false,
   voiceIsolation: false,
   channelCount: 2,
-  sampleRate: 48000,
   googEchoCancellation: false,
   googAutoGainControl: false,
   googNoiseSuppression: false,
