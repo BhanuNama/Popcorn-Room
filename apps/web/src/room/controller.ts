@@ -43,6 +43,8 @@ import { caps } from '@/lib/browser';
 import { clock } from '@/lib/clock';
 import { loadPref, savePref, session } from '@/lib/session';
 import { uid } from '@/lib/utils';
+import { patchPublisherBitrateSdp, startBitrateAutopilot } from './bitrate';
+import { P2PMovieManager } from './p2pMovie';
 import { canControl, roleRank, useRoom, type ChatMsg, type ChatToastItem, type PersonVM, type Quality } from '@/store/room';
 
 type JoinOk = Extract<JoinResponse, { status: 'ok' }>;
@@ -130,6 +132,33 @@ class RoomController {
   private localAnalyserBuf: Uint8Array<ArrayBuffer> | null = null;
   private localMovieTracks: MediaStreamTrack[] = [];
   private localMovieStreamEl: HTMLVideoElement | null = null;
+  private stopShareAutopilot: (() => void) | null = null;
+  private p2pHostFallbackListeners = new Set<() => void>();
+  private p2pGuestStateListeners = new Set<(active: boolean) => void>();
+  private p2pGuestFallbackListeners = new Set<() => void>();
+
+  readonly p2pMovie = new P2PMovieManager({
+    send: (msg, to) => void this.send(msg, to ? [to] : undefined),
+    getGuestIds: () => [...(this.room?.remoteParticipants.keys() ?? [])],
+    onHostFallback: () => this.p2pHostFallbackListeners.forEach((fn) => fn()),
+    onGuestFallback: () => this.p2pGuestFallbackListeners.forEach((fn) => fn()),
+    onGuestStateChange: (active) => this.p2pGuestStateListeners.forEach((fn) => fn(active)),
+  });
+
+  onP2PMovieEvents(handlers: {
+    onHostFallback?: () => void;
+    onGuestFallback?: () => void;
+    onGuestStateChange?: (active: boolean) => void;
+  }): () => void {
+    if (handlers.onHostFallback) this.p2pHostFallbackListeners.add(handlers.onHostFallback);
+    if (handlers.onGuestFallback) this.p2pGuestFallbackListeners.add(handlers.onGuestFallback);
+    if (handlers.onGuestStateChange) this.p2pGuestStateListeners.add(handlers.onGuestStateChange);
+    return () => {
+      if (handlers.onHostFallback) this.p2pHostFallbackListeners.delete(handlers.onHostFallback);
+      if (handlers.onGuestFallback) this.p2pGuestFallbackListeners.delete(handlers.onGuestFallback);
+      if (handlers.onGuestStateChange) this.p2pGuestStateListeners.delete(handlers.onGuestStateChange);
+    };
+  }
 
   /* ------------------------------ lifecycle ------------------------------ */
 
@@ -154,7 +183,7 @@ class RoomController {
     });
 
     const room = new Room({
-      adaptiveStream: true,
+      adaptiveStream: false,
       dynacast: true,
       // Use native HTML5 Audio elements for each track: eliminates WebAudio downmix/clipping
       // while allowing independent per-track volume control via track.setVolume()
@@ -177,6 +206,7 @@ class RoomController {
 
     this.wire(room);
     await room.connect(join.url, join.token, { autoSubscribe: true });
+    patchPublisherBitrateSdp(room, 5000, 2000, 10000);
     useRoom.setState({ connection: 'connected' });
     this.refreshPeople();
     // Ask existing members for the room state; the authority will answer.
@@ -197,6 +227,9 @@ class RoomController {
   }
 
   async disconnect() {
+    this.stopShareAutopilot?.();
+    this.stopShareAutopilot = null;
+    this.p2pMovie.destroy();
     this.stopLocalAudioMonitor();
     this.stopBlackFrameDetector();
     await this.stopLocalMovieStream();
@@ -233,9 +266,9 @@ class RoomController {
           pub.setVideoQuality(VideoQuality.HIGH);
         }
         if (pub.source === Track.Source.ScreenShare || pub.source === Track.Source.ScreenShareAudio) {
-          // Lock tight 120ms playout delay on BOTH screen video & stereo audio so neither builds 1s+ lag or drifts out of sync
+          // 250ms playout delay absorbs Cloud SFU jitter smoothly while keeping A/V tightly locked
           try {
-            track.setPlayoutDelay(0.12);
+            track.setPlayoutDelay(0.25);
           } catch {}
         }
         refresh();
@@ -383,6 +416,9 @@ class RoomController {
     const { local } = useRoom.getState();
     this.send({ t: 'presence', hand: local.hand, ready: local.ready, buffering: false }, [p.identity]);
     if (this.isAuthority()) this.send(this.snapshot(), [p.identity]);
+    if (this.p2pMovie.isHostActive()) {
+      void this.p2pMovie.connectPeer(p.identity);
+    }
   }
 
   private onLocalMetaChanged() {
@@ -526,6 +562,17 @@ class RoomController {
           fileSize: m.fileSize ?? null,
           duration: m.duration ?? null,
         });
+        break;
+      case 'p2p-ready':
+      case 'p2p-fallback':
+        void this.p2pMovie.handleSignal(p.identity, m);
+        break;
+      case 'p2p-offer':
+      case 'p2p-answer':
+      case 'p2p-ice':
+        if (m.to === this.room?.localParticipant.identity) {
+          void this.p2pMovie.handleSignal(p.identity, m);
+        }
         break;
     }
   }
@@ -725,6 +772,8 @@ class RoomController {
 
   setMode(mode: StageMode) {
     if (mode !== 'local') {
+      this.p2pMovie.stopHost();
+      this.p2pMovie.resetGuest();
       void this.stopLocalMovieStream();
     }
     useRoom.setState({ mode });
@@ -1272,8 +1321,11 @@ class RoomController {
         .catch(() => {});
     }
 
-    const targetBitrate = share60 ? 6_000_000 : 4_500_000;
+    const targetBitrate = share60 ? 10_000_000 : 6_500_000;
     const targetFps = share60 ? 60 : 30;
+    if (this.room) {
+      patchPublisherBitrateSdp(this.room, 5000, 2500, 12000);
+    }
     const capture: ScreenShareCaptureOptions = {
       audio: SCREEN_AUDIO_CAPTURE,
       resolution: { width: 1920, height: 1080, frameRate: targetFps },
@@ -1290,10 +1342,10 @@ class RoomController {
       dtx: false, // never stop sending in quiet scenes
       red: false, // RED must be disabled for stereo music
       simulcast: false, // single clean stream
-      videoCodec: 'vp8', // Fastest sub-50ms hardware/libvpx encode across Windows, Mac, Android & iOS (zero OpenH264/VP9 lag)
+      videoCodec: 'h264', // Single-stream hardware GPU encode/decode across Windows, Mac & mobile
       backupCodec: false,
       screenShareEncoding: { maxBitrate: targetBitrate, maxFramerate: targetFps, priority: 'high' },
-      degradationPreference: 'balanced', // keeps video tightly synced with audio instead of stalling frames
+      degradationPreference: 'maintain-framerate', // keep smooth 60fps/30fps motion without stuttering
     };
 
     try {
@@ -1314,12 +1366,14 @@ class RoomController {
             params.encodings[0].maxBitrate = targetBitrate;
             params.encodings[0].maxFramerate = targetFps;
             params.encodings[0].priority = 'high';
-            params.degradationPreference = 'balanced';
+            params.degradationPreference = 'maintain-framerate';
             await sender.setParameters(params);
           }
         } catch {
           // Some browsers disallow mutating certain sender fields; safe to ignore
         }
+        this.stopShareAutopilot?.();
+        this.stopShareAutopilot = startBitrateAutopilot(sender, targetBitrate, targetFps);
       }
     } catch (e) {
       const err = e as Error;
@@ -1476,6 +1530,8 @@ class RoomController {
   }
 
   private onLocalShareEnded() {
+    this.stopShareAutopilot?.();
+    this.stopShareAutopilot = null;
     const s = useRoom.getState();
     if (!s.local.sharing) return;
     s.setLocal({ sharing: false });

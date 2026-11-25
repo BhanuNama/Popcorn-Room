@@ -71,9 +71,110 @@ export function LocalStage() {
     setRemoteVideoEl((prev) => (prev === el ? prev : el));
   }, []);
   const [hasRemoteStream, setHasRemoteStream] = useState(false);
+  const [p2pGuestActive, setP2pGuestActive] = useState(() => controller.p2pMovie.isGuestActive());
+  const [p2pHostFallback, setP2pHostFallback] = useState(false);
   const [remoteSharerName, setRemoteSharerName] = useState('');
   const [preferLocalFile, setPreferLocalFile] = useState(false);
   const [remoteAudioBlocked, setRemoteAudioBlocked] = useState(false);
+  const [remoteTime, setRemoteTime] = useState(0);
+  const [remoteDuration, setRemoteDuration] = useState(0);
+  const useP2POrRemote = p2pGuestActive || hasRemoteStream;
+
+  // Subscribe to P2P Direct Movie events & attach guest MSE video element
+  useEffect(() => {
+    setP2pGuestActive(controller.p2pMovie.isGuestActive());
+    const unsub = controller.onP2PMovieEvents({
+      onGuestStateChange: (active) => setP2pGuestActive(active),
+      onGuestFallback: () => setP2pGuestActive(false),
+      onHostFallback: () => {
+        setP2pHostFallback(true);
+        if (videoRef.current && useRoom.getState().localMovie.url) {
+          void controller.startLocalMovieStream(videoRef.current);
+        }
+      },
+    });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    controller.p2pMovie.attachGuestVideo(!localMovie.url ? remoteVideoEl : null);
+  }, [localMovie.url, remoteVideoEl]);
+
+  // Sync guest MSE <video> play/pause/rate/position strictly with room SyncState
+  useEffect(() => {
+    const el = remoteVideoEl;
+    if (!p2pGuestActive || !el || localMovie.url) return;
+
+    const tryPlay = () => {
+      const st = useRoom.getState().sync;
+      if (st.status !== 'playing') {
+        if (!el.paused) el.pause();
+        return;
+      }
+      if (!el.paused) return;
+      void el.play().catch((err) => {
+        if (err?.name === 'NotAllowedError') {
+          el.muted = true;
+          setRemoteAudioBlocked(true);
+          void el.play().catch(() => {});
+        }
+      });
+    };
+
+    const syncTick = () => {
+      const st = useRoom.getState().sync;
+      const rate = st.rate || 1;
+      if (Math.abs(el.playbackRate - rate) > 1e-3) el.playbackRate = rate;
+
+      if (st.status === 'paused') {
+        if (!el.paused) el.pause();
+        if (Math.abs(el.currentTime - st.position) > 0.35 && el.readyState >= 1) {
+          el.currentTime = st.position;
+        }
+        return;
+      }
+
+      if (st.status === 'playing') {
+        const expected = expectedPosition(st, clock.offsetMs);
+        const isBufferedAt = (t: number) => {
+          for (let i = 0; i < el.buffered.length; i++) {
+            if (t >= el.buffered.start(i) - 0.5 && t <= el.buffered.end(i) + 0.2) return true;
+          }
+          return false;
+        };
+        if (el.paused) {
+          if (Math.abs(el.currentTime - expected) > 0.35 && el.readyState >= 1 && isBufferedAt(expected)) {
+            el.currentTime = expected;
+          }
+          tryPlay();
+          return;
+        }
+        if (Math.abs(el.currentTime - expected) > 0.65 && el.readyState >= 2 && isBufferedAt(expected)) {
+          el.currentTime = expected;
+        }
+      }
+    };
+
+    const onPlayWhilePaused = () => {
+      if (useRoom.getState().sync.status === 'paused') {
+        el.pause();
+      }
+    };
+
+    el.muted = false;
+    el.volume = Math.max(0, Math.min(1, useRoom.getState().audio.streamVolume * useRoom.getState().duck));
+    syncTick();
+    const timer = window.setInterval(syncTick, 1000);
+    el.addEventListener('canplay', syncTick);
+    el.addEventListener('loadedmetadata', syncTick);
+    el.addEventListener('play', onPlayWhilePaused);
+    return () => {
+      window.clearInterval(timer);
+      el.removeEventListener('canplay', syncTick);
+      el.removeEventListener('loadedmetadata', syncTick);
+      el.removeEventListener('play', onPlayWhilePaused);
+    };
+  }, [p2pGuestActive, sync, remoteVideoEl, localMovie.url]);
 
   // Sync remote <video> volume cleanly with Mixer Stream Volume & Smart Duck
   useEffect(() => {
@@ -81,12 +182,12 @@ export function LocalStage() {
     if (!el || localMovie.url) return;
     const targetVol = Math.max(0, Math.min(1, streamVolume * duck));
     el.volume = targetVol;
-  }, [streamVolume, duck, localMovie.url, hasRemoteStream]);
+  }, [streamVolume, duck, localMovie.url, hasRemoteStream, p2pGuestActive]);
 
-  // Attach BOTH remote video & remote audio onto ONE <video> element for hardware A/V lip-sync
+  // Attach BOTH remote video & remote audio onto ONE <video> element for hardware A/V lip-sync (when not using direct P2P MSE)
   useEffect(() => {
     const room = controller.room;
-    if (!room || localMovie.url) {
+    if (!room || localMovie.url || p2pGuestActive) {
       setHasRemoteStream(false);
       return;
     }
@@ -175,7 +276,7 @@ export function LocalStage() {
       if (attachedVideo && videoEl) attachedVideo.detach(videoEl);
       if (attachedAudio && videoEl) attachedAudio.detach(videoEl);
     };
-  }, [localMovie.url, remoteVideoEl]);
+  }, [localMovie.url, remoteVideoEl, p2pGuestActive]);
 
   const unmuteRemoteStream = useCallback(() => {
     const el = remoteVideoRef.current;
@@ -187,9 +288,11 @@ export function LocalStage() {
     void controller.unlockAudio();
   }, [streamVolume, duck]);
 
-  // Stop captured stream when leaving local player cleanly
+  // Stop captured stream & P2P movie session when leaving local player cleanly
   useEffect(() => {
     return () => {
+      controller.p2pMovie.stopHost();
+      controller.p2pMovie.resetGuest();
       void controller.stopLocalMovieStream();
     };
   }, []);
@@ -238,6 +341,10 @@ export function LocalStage() {
 
         controller.stopLocalMovieStream();
         controller.loadLocalMovie(file.name, file.size);
+        if (canControl(useRoom.getState())) {
+          const started = controller.p2pMovie.hostStart(file);
+          setP2pHostFallback(!started);
+        }
         toast.success(`Loaded "${file.name}"`);
       } catch (err) {
         console.error('Failed to create object URL', err);
@@ -374,6 +481,9 @@ export function LocalStage() {
     }
     if (isController) {
       controller.seek(target);
+      if (controller.p2pMovie.isHostActive()) {
+        controller.p2pMovie.hostSeek(target);
+      }
     }
   };
 
@@ -388,6 +498,9 @@ export function LocalStage() {
     }
     if (isController) {
       controller.seek(target);
+      if (controller.p2pMovie.isHostActive()) {
+        controller.p2pMovie.hostSeek(target);
+      }
     }
   };
 
@@ -554,7 +667,7 @@ export function LocalStage() {
       {/* Dynamic 4-zone edge Ambilight Bias Lighting */}
       <AmbientGlow
         videoEl={localMovie.url ? videoElState : remoteVideoEl}
-        active={Boolean((localMovie.url || hasRemoteStream) && ambilight)}
+        active={Boolean((localMovie.url || useP2POrRemote) && ambilight)}
       />
 
       {/* Hidden inputs */}
@@ -606,16 +719,28 @@ export function LocalStage() {
           <video
             ref={setRemoteVideoNode}
             playsInline
-            autoPlay
-            onClick={() => unmuteRemoteStream()}
+            autoPlay={!p2pGuestActive}
+            onLoadedMetadata={(e) => {
+              const d = e.currentTarget.duration;
+              if (Number.isFinite(d) && d > 0) setRemoteDuration(d);
+            }}
+            onTimeUpdate={(e) => setRemoteTime(e.currentTarget.currentTime)}
+            onClick={() => {
+              if (remoteAudioBlocked) unmuteRemoteStream();
+              else if (isController) {
+                const cur = remoteVideoRef.current?.currentTime ?? remoteTime;
+                if (sync.status === 'playing') controller.pause(cur);
+                else controller.play(cur);
+              }
+            }}
             onDoubleClick={() => void toggleRoomFullscreen()}
             className={`relative z-10 max-h-full max-w-full rounded-xl bg-black object-contain shadow-2xl ${
-              !hasRemoteStream || preferLocalFile ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
+              !useP2POrRemote || preferLocalFile ? 'pointer-events-none absolute inset-0 opacity-0' : 'block'
             }`}
           />
 
           {/* Tap-to-unmute pill when phone/browser autoplay muted the audio track */}
-          {hasRemoteStream && !preferLocalFile && remoteAudioBlocked && (
+          {useP2POrRemote && !preferLocalFile && remoteAudioBlocked && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -628,13 +753,20 @@ export function LocalStage() {
           )}
 
           {/* Live stream HUD overlays for Guests */}
-          {hasRemoteStream && !preferLocalFile && (
+          {useP2POrRemote && !preferLocalFile && (
             <>
               <div className="absolute top-3.5 left-3.5 z-20 flex items-center gap-2 rounded-full bg-ink-950/80 px-3 py-1.5 text-xs font-medium text-white ring-1 ring-white/15 backdrop-blur-md">
-                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="truncate max-w-[180px] sm:max-w-xs">
-                  {sync.videoId ? `${sync.videoId} · via ${remoteSharerName}` : `Live from ${remoteSharerName}`}
+                <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="truncate max-w-[150px] sm:max-w-[240px]">
+                  {sync.videoId || `Live from ${remoteSharerName || 'Host'}`}
                 </span>
+                {p2pGuestActive ? (
+                  <span className="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                    4K P2P
+                  </span>
+                ) : sync.videoId ? (
+                  <span className="shrink-0 text-[11px] text-white/60">· {remoteSharerName || 'Host'}</span>
+                ) : null}
               </div>
 
               <div className="absolute top-3.5 right-3.5 z-20 flex items-center gap-2">
@@ -653,10 +785,151 @@ export function LocalStage() {
                   {fullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
                 </button>
               </div>
+
+              {/* Guest Bottom Controls Bar */}
+              <AnimatePresence>
+                {controlsVisible && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 16 }}
+                    transition={{ duration: 0.2 }}
+                    className="absolute inset-x-0 bottom-0 z-20 flex flex-col justify-end rounded-b-xl bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 pt-12"
+                  >
+                    {p2pGuestActive && (remoteDuration > 0 || (localMovie.duration ?? 0) > 0) && (
+                      <div className="mb-3 flex items-center gap-3">
+                        <span className="min-w-[45px] text-xs font-medium text-zinc-300">
+                          {formatTime(remoteTime)}
+                        </span>
+                        <div className="flex-1">
+                          {isController ? (
+                            <Slider
+                              value={(remoteDuration || localMovie.duration || 0) > 0 ? remoteTime / (remoteDuration || localMovie.duration || 1) : 0}
+                              onChange={(pct) => {
+                                const total = remoteDuration || localMovie.duration || 0;
+                                const target = Math.max(0, Math.min(total, pct * total));
+                                setRemoteTime(target);
+                                controller.seek(target);
+                              }}
+                              label="Seek movie timeline"
+                              tone="coral"
+                            />
+                          ) : (
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/15">
+                              <div
+                                className="h-full rounded-full bg-coral-400 transition-all"
+                                style={{
+                                  width: `${Math.min(100, Math.max(0, (remoteTime / (remoteDuration || localMovie.duration || 1)) * 100))}%`,
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <span className="min-w-[45px] text-xs font-medium text-zinc-400">
+                          {formatTime(remoteDuration || localMovie.duration || 0)}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {isController && (
+                          <>
+                            <button
+                              onClick={() => {
+                                const cur = remoteVideoRef.current?.currentTime ?? remoteTime;
+                                if (sync.status === 'playing') controller.pause(cur);
+                                else controller.play(cur);
+                              }}
+                              className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white transition-all hover:bg-white/20 active:scale-95 cursor-pointer"
+                              title={sync.status === 'playing' ? 'Pause' : 'Play'}
+                            >
+                              {sync.status === 'playing' ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 ml-0.5" />}
+                            </button>
+                            {p2pGuestActive && (
+                              <>
+                                <button
+                                  onClick={() => controller.seek(Math.max(0, remoteTime - 10))}
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
+                                  title="Rewind 10s"
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => controller.seek(Math.min(remoteDuration || localMovie.duration || remoteTime + 10, remoteTime + 10))}
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
+                                  title="Forward 10s"
+                                >
+                                  <RotateCw className="h-4 w-4" />
+                                </button>
+                              </>
+                            )}
+                          </>
+                        )}
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              const el = remoteVideoRef.current;
+                              if (remoteAudioBlocked || streamVolume === 0 || el?.muted) {
+                                unmuteRemoteStream();
+                                if (streamVolume === 0) useRoom.getState().setAudio({ streamVolume: 1 });
+                              } else if (el) {
+                                el.muted = true;
+                                setRemoteAudioBlocked(true);
+                              }
+                            }}
+                            className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
+                            title={remoteAudioBlocked || streamVolume === 0 ? 'Unmute' : 'Mute'}
+                          >
+                            {remoteAudioBlocked || streamVolume === 0 ? (
+                              <VolumeX className="h-4 w-4 text-red-400" />
+                            ) : (
+                              <Volume2 className="h-4 w-4" />
+                            )}
+                          </button>
+                          <div className="w-20 sm:w-24">
+                            <Slider
+                              value={remoteAudioBlocked ? 0 : streamVolume}
+                              onChange={(v) => {
+                                useRoom.getState().setAudio({ streamVolume: v });
+                                const el = remoteVideoRef.current;
+                                if (el) {
+                                  el.muted = v === 0;
+                                  el.volume = v;
+                                  setRemoteAudioBlocked(v === 0);
+                                }
+                              }}
+                              label="Stream volume"
+                              tone="coral"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setPreferLocalFile(true)}
+                          className="butter-btn sm:hidden rounded-lg border border-white/15 bg-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                        >
+                          Local 4K
+                        </button>
+                        <button
+                          onClick={() => void toggleRoomFullscreen()}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-300 transition-all hover:bg-white/10 hover:text-white cursor-pointer"
+                          title={fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                        >
+                          {fullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </>
           )}
 
-          {(!hasRemoteStream || preferLocalFile) && (
+          {(!useP2POrRemote || preferLocalFile) && (
             <div className="relative z-10 flex max-w-lg flex-col items-center justify-center p-6 sm:p-8 text-center">
               <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
                 <div className="animate-orbit-slow h-72 w-72 rounded-full border border-white/[0.06]" />
@@ -704,7 +977,7 @@ export function LocalStage() {
                   <SubtitlesIcon className="h-4 w-4" />
                   Add Subtitle (.srt / .vtt)
                 </button>
-                {hasRemoteStream && preferLocalFile && (
+                {useP2POrRemote && preferLocalFile && (
                   <button
                     onClick={() => setPreferLocalFile(false)}
                     className="butter-btn rounded-xl border border-white/15 bg-white/[0.06] hover:bg-white/[0.12] px-4 py-3 text-xs font-semibold text-white/85"
@@ -732,7 +1005,7 @@ export function LocalStage() {
             src={localMovie.url}
             onLoadedMetadata={onLoadedMetadata}
             onPlaying={() => {
-              if (videoRef.current && isController) {
+              if (videoRef.current && isController && (p2pHostFallback || !controller.p2pMovie.isHostActive())) {
                 void controller.startLocalMovieStream(videoRef.current);
               }
             }}

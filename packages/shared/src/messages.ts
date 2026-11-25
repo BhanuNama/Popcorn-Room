@@ -83,7 +83,12 @@ export type DataMessage =
   | { t: 'theme'; theme: RoomTheme }
   | { t: 'local-meta'; fileName: string; fileSize?: number; duration?: number }
   | { t: 'settings'; settings: RoomSettings }
-  | { t: 'host-mute' };
+  | { t: 'host-mute' }
+  | { t: 'p2p-ready'; fileName: string; fileSize: number; duration?: number }
+  | { t: 'p2p-offer'; to: string; sdp: string; fileName: string; fileSize: number }
+  | { t: 'p2p-answer'; to: string; sdp: string }
+  | { t: 'p2p-ice'; to: string; candidate: { candidate?: string; sdpMid?: string | null; sdpMLineIndex?: number | null } }
+  | { t: 'p2p-fallback' };
 
 export const DATA_TOPIC = 'popcorn';
 

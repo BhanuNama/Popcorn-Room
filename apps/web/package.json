@@ -22,6 +22,7 @@
     "livekit-client": "^2.24.1",
     "lucide-react": "^1.73.0",
     "motion": "^14.14.0",
+    "mp4box": "^2.6.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5",
