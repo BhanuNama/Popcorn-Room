@@ -1019,20 +1019,6 @@ class RoomController {
           forceStereo: false,
         });
 
-        // Re-assert raw stereo constraints on active screen share audio so WebRTC never applies voice DSP to the movie
-        const shareAudioPub = lp.getTrackPublication(Track.Source.ScreenShareAudio);
-        if (shareAudioPub?.track?.mediaStreamTrack) {
-          void shareAudioPub.track.mediaStreamTrack
-            .applyConstraints({
-              echoCancellation: false,
-              noiseSuppression: false,
-              autoGainControl: false,
-              channelCount: 2,
-              sampleRate: 48000,
-            } as MediaTrackConstraints)
-            .catch(() => {});
-        }
-
         // Ensure microphone track is UNMUTED so the user can speak immediately
         if (pub?.track && pub.track.isMuted) {
           await pub.track.unmute();
