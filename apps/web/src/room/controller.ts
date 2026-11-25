@@ -1418,8 +1418,10 @@ class RoomController {
     const lp = this.room?.localParticipant;
     if (!lp) return;
     await this.stopLocalMovieStream();
-    if (!caps.canShareScreen) {
-      toast.error('Screen sharing is not available on this device', { description: 'Use Chrome or Edge on a desktop.' });
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getDisplayMedia) {
+      toast.error('Screen sharing is not supported on this browser', {
+        description: 'Open on a desktop Chrome/Edge to present, or use YouTube, Local Movie, or Music Lounge here.',
+      });
       return;
     }
     if (!parseMeta(lp.metadata).presenter) {

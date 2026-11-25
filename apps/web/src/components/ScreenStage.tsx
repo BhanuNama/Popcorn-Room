@@ -19,7 +19,6 @@ import {
 import { YoutubeIcon } from './YoutubeIcon';
 import { controller } from '@/room/controller';
 import { isAudioDropCandidate } from '@/room/p2pAudio';
-import { caps } from '@/lib/browser';
 import { useRoom } from '@/store/room';
 import { AmbientGlow } from './AmbientGlow';
 import { Button } from './ui';
@@ -454,28 +453,20 @@ export function ScreenStage() {
             Share a tab in stereo, sync YouTube, stream 4K files P2P, or vibe in the Music Lounge.
           </p>
 
-          {/* 4-Card Responsive Interactive Launch Dock (2x2 on mobile/tablet, 4 cols on lg+) */}
-          <div
-            className={`mt-4 sm:mt-6 grid w-full gap-2 sm:gap-2.5 ${
-              caps.canShareScreen
-                ? 'grid-cols-2 lg:grid-cols-4 max-w-lg lg:max-w-3xl'
-                : 'grid-cols-1 xs:grid-cols-3 sm:grid-cols-3 max-w-sm sm:max-w-2xl'
-            }`}
-          >
-            {caps.canShareScreen && (
-              <button
-                onClick={() => controller.startShare()}
-                className="butter-btn group flex flex-col items-start gap-2 rounded-2xl bg-coral-500/20 hover:bg-coral-500/30 p-3 sm:p-4 text-left ring-1 ring-coral-400/40 backdrop-blur-md"
-              >
-                <span className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-coral-500 text-white shadow">
-                  <MonitorUp size={16} />
-                </span>
-                <div>
-                  <div className="text-xs font-bold text-white">Share Screen</div>
-                  <div className="text-[10px] sm:text-[11px] text-white/60 mt-0.5">60 fps · P2P / SFU</div>
-                </div>
-              </button>
-            )}
+          {/* 4-Card Responsive Interactive Launch Dock (always 2x2 on mobile/tablet, 4 cols on lg+) */}
+          <div className="mt-4 sm:mt-6 grid w-full max-w-lg lg:max-w-3xl grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5">
+            <button
+              onClick={() => controller.startShare()}
+              className="butter-btn group flex flex-col items-start gap-2 rounded-2xl bg-coral-500/20 hover:bg-coral-500/30 p-3 sm:p-4 text-left ring-1 ring-coral-400/40 backdrop-blur-md"
+            >
+              <span className="grid h-8 w-8 sm:h-9 sm:w-9 shrink-0 place-items-center rounded-xl bg-coral-500 text-white shadow">
+                <MonitorUp size={16} />
+              </span>
+              <div>
+                <div className="text-xs font-bold text-white">Share Screen</div>
+                <div className="text-[10px] sm:text-[11px] text-white/60 mt-0.5">60 fps · P2P / SFU</div>
+              </div>
+            </button>
 
             <button
               onClick={() => useRoom.getState().setUi({ youtubeDialog: true })}

@@ -22,7 +22,6 @@ import { controller } from '@/room/controller';
 import { useRoom } from '@/store/room';
 import { Tip } from './ui';
 import { cn } from '@/lib/utils';
-import { caps } from '@/lib/browser';
 import { toggleRoomFullscreen } from '@/lib/fullscreen';
 
 export function TopBar() {
@@ -80,35 +79,33 @@ export function TopBar() {
 
       {/* Center: Unified Stage Mode Switcher Dock + Audio Mixer */}
       <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
-        <div className="flex items-center gap-0.5 rounded-2xl bg-white/[0.06] p-0.5 sm:p-1 ring-1 ring-white/10 backdrop-blur-md">
-          {/* Screen Share */}
-          {caps.canShareScreen && (
-            <Tip label={local.sharing ? 'Stop Sharing Screen' : 'Share Screen with Stereo Audio'}>
-              <button
-                onClick={() => controller.toggleShare()}
-                className={cn(
-                  'butter-btn flex h-8 items-center gap-1.5 rounded-xl px-2 sm:px-3 text-xs font-semibold',
-                  local.sharing
-                    ? 'bg-coral-500 text-white shadow-glow hover:bg-coral-600'
-                    : mode === 'screen'
-                      ? 'bg-white/12 text-white ring-1 ring-white/15'
-                      : 'text-white/70 hover:bg-white/[0.08] hover:text-white',
-                )}
-              >
-                {local.sharing ? <MonitorOff size={14} /> : <MonitorUp size={14} />}
-                <span className="hidden md:inline">
-                  {local.sharing ? 'Stop Share' : 'Share Screen'}
-                </span>
-              </button>
-            </Tip>
-          )}
+        <div className="flex items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden rounded-2xl bg-white/[0.06] p-0.5 sm:p-1 ring-1 ring-white/10 backdrop-blur-md">
+          {/* Screen Share (always rendered on mobile & laptop; prompts cleanly if browser lacks capture API) */}
+          <Tip label={local.sharing ? 'Stop Sharing Screen' : 'Share Screen with Stereo Audio'}>
+            <button
+              onClick={() => controller.toggleShare()}
+              className={cn(
+                'butter-btn flex h-8 shrink-0 items-center gap-1.5 rounded-xl px-2 sm:px-3 text-xs font-semibold',
+                local.sharing
+                  ? 'bg-coral-500 text-white shadow-glow hover:bg-coral-600'
+                  : mode === 'screen'
+                    ? 'bg-white/12 text-white ring-1 ring-white/15'
+                    : 'text-white/70 hover:bg-white/[0.08] hover:text-white',
+              )}
+            >
+              {local.sharing ? <MonitorOff size={14} /> : <MonitorUp size={14} />}
+              <span className="hidden md:inline">
+                {local.sharing ? 'Stop Share' : 'Share Screen'}
+              </span>
+            </button>
+          </Tip>
 
           {/* YouTube Mode */}
           <Tip label="Synced YouTube Mode">
             <button
               onClick={() => useRoom.getState().setUi({ youtubeDialog: true })}
               className={cn(
-                'butter-btn flex h-8 items-center gap-1.5 rounded-xl px-2.5 sm:px-3 text-xs font-semibold',
+                'butter-btn flex h-8 shrink-0 items-center gap-1.5 rounded-xl px-2 sm:px-3 text-xs font-semibold',
                 mode === 'youtube'
                   ? 'bg-red-500/25 text-red-200 ring-1 ring-red-400/40'
                   : 'text-white/70 hover:bg-white/[0.08] hover:text-white',
@@ -124,7 +121,7 @@ export function TopBar() {
             <button
               onClick={() => controller.setMode('local')}
               className={cn(
-                'butter-btn flex h-8 items-center gap-1.5 rounded-xl px-2.5 sm:px-3 text-xs font-semibold',
+                'butter-btn flex h-8 shrink-0 items-center gap-1.5 rounded-xl px-2 sm:px-3 text-xs font-semibold',
                 mode === 'local'
                   ? 'bg-amber-400/20 text-amber-200 ring-1 ring-amber-400/40'
                   : 'text-white/70 hover:bg-white/[0.08] hover:text-white',
@@ -140,7 +137,7 @@ export function TopBar() {
             <button
               onClick={() => controller.setMode('music')}
               className={cn(
-                'butter-btn flex h-8 items-center gap-1.5 rounded-xl px-2.5 sm:px-3 text-xs font-semibold',
+                'butter-btn flex h-8 shrink-0 items-center gap-1.5 rounded-xl px-2 sm:px-3 text-xs font-semibold',
                 mode === 'music'
                   ? 'bg-emerald-500/25 text-emerald-200 ring-1 ring-emerald-400/40'
                   : 'text-white/70 hover:bg-white/[0.08] hover:text-white',
@@ -157,7 +154,7 @@ export function TopBar() {
       </div>
 
       {/* Right: Connection Quality, Stage Layout, Themes, Invite & Settings */}
-      <div className="flex items-center gap-1 sm:gap-1.5">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
         {/* Connection Quality indicator */}
         <div
           className="hidden xl:flex items-center gap-1.5 rounded-xl bg-white/[0.06] px-2.5 py-1.5 text-xs text-white/70 ring-1 ring-white/10"
