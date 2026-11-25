@@ -957,10 +957,12 @@ class RoomController {
             let devs = await navigator.mediaDevices.enumerateDevices();
             let inputs = devs.filter((d) => d.kind === 'audioinput');
 
-            // If device labels are blank because getUserMedia hasn't been probed yet, unlock them
+            // If device labels are blank because getUserMedia hasn't been probed yet, unlock them without voice-call DSP
             if (inputs.length > 0 && !inputs[0].label) {
               try {
-                const temp = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const temp = await navigator.mediaDevices.getUserMedia({
+                  audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+                });
                 temp.getTracks().forEach((t) => t.stop());
                 devs = await navigator.mediaDevices.enumerateDevices();
                 inputs = devs.filter((d) => d.kind === 'audioinput');
@@ -972,7 +974,8 @@ class RoomController {
               id === 'communications' ||
               /headset|bluetooth|buds|airpods|hands-free|handsfree|hfp|sco|ag audio|telephony/i.test(label);
 
-            if (!chosenDeviceId) {
+            const chosenInfo = inputs.find((d) => d.deviceId === chosenDeviceId);
+            if (!chosenDeviceId || chosenDeviceId === 'default' || (chosenInfo && isBtOrVirtual(chosenInfo.label, chosenInfo.deviceId))) {
               const preferredInternal = inputs.find(
                 (d) =>
                   !isBtOrVirtual(d.label, d.deviceId) &&
