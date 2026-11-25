@@ -5,21 +5,26 @@ import {
   ArrowRight,
   AudioLines,
   Check,
+  Disc3,
   Film,
   Headphones,
   Link2,
   ListVideo,
   MessageCircle,
   MonitorUp,
+  Music,
   Orbit as OrbitIcon,
   Palette,
+  Pause,
   Play,
   Radio,
+  Share2,
   ShieldCheck,
   Smartphone,
   Sparkles,
   Users,
   X,
+  Zap,
 } from 'lucide-react';
 import { YoutubeIcon } from '@/components/YoutubeIcon';
 import { toast } from 'sonner';
@@ -158,6 +163,7 @@ export default function Landing() {
         </section>
 
         <HeroShowcase />
+        <UpgradesShowcase />
         <OrbitArchitecture />
         <Features />
         <SoundSection />
@@ -204,9 +210,10 @@ const DEMO_THEMES = [
 ];
 
 const DEMO_MODES = [
-  { id: 'local', label: '4K Local Film', badge: 'Interstellar_4K.mp4 · Subtitles ON' },
+  { id: 'local', label: '4K P2P Swarm', badge: 'Interstellar_4K.mp4 · Swarm O(1)' },
+  { id: 'screen', label: 'Screen Share', badge: 'Direct P2P (2-way) · Simulcast (3+)' },
+  { id: 'music', label: 'Music Lounge', badge: 'Lossless FLAC · Synced Lyrics' },
   { id: 'youtube', label: 'YouTube Sync', badge: 'Locked within 0.1s' },
-  { id: 'screen', label: 'Screen Share', badge: '1080p 60fps Stereo' },
 ];
 
 function HeroShowcase() {
@@ -329,6 +336,30 @@ function HeroShowcase() {
                   </div>
                 )}
 
+                {demoMode.id === 'music' && (
+                  <div className="absolute inset-0 flex items-center justify-center gap-4 bg-black/55 backdrop-blur-sm px-4">
+                    <div className="flex items-center">
+                      <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-xl bg-gradient-to-br from-coral-500 to-indigo-600 shadow-lg ring-1 ring-white/25 grid place-items-center text-white z-10">
+                        <Music size={22} />
+                      </div>
+                      <div className="-ml-6 h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-zinc-950 ring-1 ring-white/20 animate-[spin_5s_linear_infinite] grid place-items-center">
+                        <span className="h-3 w-3 rounded-full bg-white/80" />
+                      </div>
+                    </div>
+                    <div className="hidden sm:flex items-end gap-1 h-10">
+                      {[0.4, 0.8, 0.55, 1, 0.7, 0.9, 0.5, 0.75].map((h, idx) => (
+                        <motion.span
+                          key={idx}
+                          animate={{ scaleY: [h * 0.4, h, h * 0.5] }}
+                          transition={{ duration: 0.9, repeat: Infinity, delay: idx * 0.1 }}
+                          style={{ originY: 1 }}
+                          className="w-1.5 h-full rounded-full bg-white/85"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Player timeline */}
                 <div className="absolute bottom-3 left-3 right-3 flex items-center gap-2.5">
                   <span className="grid h-7 w-7 place-items-center rounded-full bg-white shadow">
@@ -440,6 +471,279 @@ function HeroShowcase() {
   );
 }
 
+/* ------------------------------ 3 Core Breakthrough Upgrades ------------------------------ */
+
+function UpgradesShowcase() {
+  const [roomMode, setRoomMode] = useState<'p2p' | 'simulcast'>('p2p');
+  const [musicPlaying, setMusicPlaying] = useState(true);
+
+  return (
+    <section className="mx-auto max-w-6xl px-5 py-16 sm:py-24">
+      <SectionHead
+        eyebrow="New performance engines"
+        title="Engineered to outpace lag"
+        sub="Three custom real-time engines under the hood—BitTorrent-style movie swarming, smart 2-way P2P screen routing, and a lossless Music Lounge."
+      />
+
+      <div className="mt-12 grid gap-5 lg:grid-cols-3">
+        {/* 1. BitTorrent-Style P2P Swarm Relay */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-40px' }}
+          transition={softSpring}
+          whileHover={{ y: -4 }}
+          className="card group relative flex flex-col justify-between overflow-hidden p-6 transition-shadow hover:shadow-float"
+        >
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-blush-100 text-coral-600 ring-1 ring-coral-500/15">
+                <Share2 size={18} />
+              </span>
+              <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-emerald-500/20">
+                O(1) Host Upload
+              </span>
+            </div>
+            <h3 className="mt-4 font-display text-lg font-bold text-ink-900">
+              P2P Swarm Relay for 4K
+            </h3>
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
+              Instead of one host uploading 5× copies of a 4K film, guests automatically relay received MP4 chunks down a binary tree—keeping host bandwidth flat even with a crowd.
+            </p>
+          </div>
+
+          {/* Animated Swarm Tree Diagram */}
+          <div className="mt-5 rounded-2xl bg-ink-950 p-4 text-white ring-1 ring-white/10">
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex items-center gap-1.5 rounded-full bg-coral-500/20 px-3 py-1 text-[10px] font-bold text-coral-300 ring-1 ring-coral-400/40">
+                <span className="h-1.5 w-1.5 rounded-full bg-coral-400 animate-ping" /> Host (1× Stream)
+              </div>
+
+              <div className="grid w-full grid-cols-2 gap-2 text-center text-[10px]">
+                {['Guest A (Relay)', 'Guest B (Relay)'].map((g, idx) => (
+                  <motion.div
+                    key={g}
+                    animate={{ borderColor: ['rgba(255,255,255,0.12)', 'rgba(52,211,153,0.45)', 'rgba(255,255,255,0.12)'] }}
+                    transition={{ duration: 2, repeat: Infinity, delay: idx * 0.5 }}
+                    className="rounded-xl border bg-white/[0.05] px-2 py-1.5 font-semibold text-white/90"
+                  >
+                    {g}
+                  </motion.div>
+                ))}
+              </div>
+
+              <div className="grid w-full grid-cols-4 gap-1.5 text-center text-[9px] text-white/65">
+                {['G3', 'G4', 'G5', 'G6'].map((c, idx) => (
+                  <motion.div
+                    key={c}
+                    animate={{ opacity: [0.55, 1, 0.55] }}
+                    transition={{ duration: 1.8, repeat: Infinity, delay: idx * 0.25 }}
+                    className="rounded-lg bg-white/[0.04] py-1 ring-1 ring-white/10"
+                  >
+                    {c}
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-2 text-[10px] text-white/55">
+              <span>6 viewers in 4K</span>
+              <span className="font-semibold text-emerald-300">Auto-rescue NAT safe</span>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* 2. 2-Person Direct P2P Screen Share + Group Simulcast */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-40px' }}
+          transition={{ ...softSpring, delay: 0.06 }}
+          whileHover={{ y: -4 }}
+          className="card group relative flex flex-col justify-between overflow-hidden p-6 transition-shadow hover:shadow-float"
+        >
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-sky-100 text-sky-600 ring-1 ring-sky-500/15">
+                <Zap size={18} />
+              </span>
+              <span className="rounded-full bg-sky-500/10 px-2.5 py-0.5 text-[10px] font-bold text-sky-700 ring-1 ring-sky-500/20">
+                5 Mbps Start · BWE
+              </span>
+            </div>
+            <h3 className="mt-4 font-display text-lg font-bold text-ink-900">
+              Direct 1-on-1 P2P + Simulcast
+            </h3>
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
+              2-person rooms bypass cloud hops over direct peer-to-peer WebRTC. When a 3rd guest joins, it seamlessly upgrades to multi-layer H.264 Simulcast without re-picking your screen.
+            </p>
+          </div>
+
+          {/* Interactive Route Switcher */}
+          <div className="mt-5 rounded-2xl bg-ink-950 p-4 text-white ring-1 ring-white/10">
+            <div className="flex rounded-xl bg-white/[0.06] p-1 text-[10px] font-semibold">
+              <button
+                type="button"
+                onClick={() => setRoomMode('p2p')}
+                className={cn(
+                  'flex-1 rounded-lg py-1.5 transition cursor-pointer',
+                  roomMode === 'p2p' ? 'bg-white text-ink-950 shadow' : 'text-white/60 hover:text-white',
+                )}
+              >
+                2 People (Direct P2P)
+              </button>
+              <button
+                type="button"
+                onClick={() => setRoomMode('simulcast')}
+                className={cn(
+                  'flex-1 rounded-lg py-1.5 transition cursor-pointer',
+                  roomMode === 'simulcast' ? 'bg-white text-ink-950 shadow' : 'text-white/60 hover:text-white',
+                )}
+              >
+                3+ Group (Simulcast)
+              </button>
+            </div>
+
+            <AnimatePresence mode="wait">
+              {roomMode === 'p2p' ? (
+                <motion.div
+                  key="p2p"
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="mt-3.5 space-y-2.5"
+                >
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="rounded-lg bg-white/10 px-2.5 py-1 font-semibold">Host 1080p60</span>
+                    <div className="relative mx-2 h-0.5 flex-1 bg-emerald-400/35 overflow-hidden">
+                      <motion.div
+                        animate={{ x: ['-100%', '200%'] }}
+                        transition={{ duration: 1.1, repeat: Infinity, ease: 'linear' }}
+                        className="h-full w-1/2 bg-emerald-400"
+                      />
+                    </div>
+                    <span className="rounded-lg bg-emerald-500/20 px-2.5 py-1 font-semibold text-emerald-300">
+                      Guest (~12 ms)
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-white/10 pt-2 text-[10px] text-white/55">
+                    <span>Zero SFU cloud hop</span>
+                    <span className="font-semibold text-emerald-300">Direct STUN link</span>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="simulcast"
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="mt-3.5 space-y-2.5"
+                >
+                  <div className="flex items-center justify-between gap-2 text-[10px]">
+                    <span className="rounded-lg bg-white/10 px-2 py-1 font-semibold shrink-0">SFU Simulcast</span>
+                    <div className="flex flex-1 flex-col gap-1">
+                      <div className="flex items-center justify-between rounded bg-white/[0.06] px-2 py-0.5">
+                        <span className="text-white/80">Fiber Laptop</span>
+                        <span className="text-emerald-300 font-semibold">1080p60</span>
+                      </div>
+                      <div className="flex items-center justify-between rounded bg-white/[0.06] px-2 py-0.5">
+                        <span className="text-white/80">4G Phone</span>
+                        <span className="text-amber-300 font-semibold">720p30</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between border-t border-white/10 pt-2 text-[10px] text-white/55">
+                    <span>Zero second picker prompt</span>
+                    <span className="font-semibold text-sky-300">Adaptive per device</span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </motion.div>
+
+        {/* 3. Listen Together — Hi-Fi Music Lounge */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, margin: '-40px' }}
+          transition={{ ...softSpring, delay: 0.12 }}
+          whileHover={{ y: -4 }}
+          className="card group relative flex flex-col justify-between overflow-hidden p-6 transition-shadow hover:shadow-float"
+        >
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-100 text-emerald-700 ring-1 ring-emerald-500/15">
+                <Music size={18} />
+              </span>
+              <span className="rounded-full bg-ink-100 px-2.5 py-0.5 text-[10px] font-bold text-ink-600">
+                No Subscription
+              </span>
+            </div>
+            <h3 className="mt-4 font-display text-lg font-bold text-ink-900">
+              Hi-Fi Music Lounge
+            </h3>
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
+              Drop lossless .flac, .mp3, or .wav albums or queue YouTube Lo-Fi together—complete with sharp album poster sleeves, spinning vinyl, spectrum bars, and synced .lrc lyrics.
+            </p>
+          </div>
+
+          {/* Interactive Mini Vinyl Lounge Preview */}
+          <div className="mt-5 rounded-2xl bg-ink-950 p-4 text-white ring-1 ring-white/10">
+            <div className="flex items-center gap-3">
+              <div className="relative flex items-center pr-4 shrink-0">
+                <motion.div
+                  animate={{ x: musicPlaying ? 14 : 4 }}
+                  transition={{ type: 'spring', stiffness: 120, damping: 16 }}
+                  className={cn(
+                    'h-11 w-11 rounded-full bg-zinc-900 ring-1 ring-white/20 grid place-items-center',
+                    musicPlaying && 'animate-[spin_5s_linear_infinite]',
+                  )}
+                >
+                  <Disc3 size={18} className="text-white/45" />
+                </motion.div>
+                <div className="-ml-8 h-12 w-12 rounded-xl bg-gradient-to-br from-ink-800 to-ink-700 ring-1 ring-white/25 shadow-lg grid place-items-center z-10">
+                  <Music size={18} className="text-white" />
+                </div>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-semibold text-white">Midnight City.flac</div>
+                <div className="truncate text-[10px] text-white/50">Lossless P2P · ID3 Poster</div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setMusicPlaying((p) => !p)}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white text-ink-950 shadow hover:scale-105 transition cursor-pointer"
+                aria-label={musicPlaying ? 'Pause preview' : 'Play preview'}
+              >
+                {musicPlaying ? <Pause size={13} /> : <Play size={13} className="ml-0.5" />}
+              </button>
+            </div>
+
+            <div className="mt-3.5 flex h-6 items-end gap-1">
+              {[0.35, 0.7, 0.5, 0.95, 0.65, 0.85, 1, 0.72, 0.55, 0.9, 0.6, 0.4].map((h, i) => (
+                <motion.span
+                  key={i}
+                  animate={musicPlaying ? { scaleY: [0.25, h, 0.35] } : { scaleY: 0.18 }}
+                  transition={{ duration: 0.75, repeat: musicPlaying ? Infinity : 0, delay: i * 0.07 }}
+                  style={{ originY: 1 }}
+                  className="h-full flex-1 rounded-full bg-white/80"
+                />
+              ))}
+            </div>
+
+            <div className="mt-2.5 flex items-center justify-between border-t border-white/10 pt-2 text-[10px] text-white/55">
+              <span className="truncate">♪ Waiting on a starry night…</span>
+              <span className="font-semibold text-white/80 shrink-0">.lrc Synced</span>
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
 /* ------------------------------ Orbit Architecture Diagram ------------------------------ */
 
 function OrbitArchitecture() {
@@ -520,8 +824,18 @@ function OrbitArchitecture() {
 const FEATURES = [
   {
     icon: Film,
-    title: '4K Local Movie Drop',
-    text: 'Drop .mp4, .mkv, or .webm files straight from your computer with .srt/.vtt subtitles and zero compression.',
+    title: '4K P2P Swarm Movie Drop',
+    text: 'Drop .mp4, .mkv, or .webm files with .srt/.vtt subtitles—friends pre-buffer in RAM and relay chunks peer-to-peer.',
+  },
+  {
+    icon: MonitorUp,
+    title: '2-Way P2P & Group Simulcast',
+    text: 'Direct peer-to-peer screen share for two people, automatically upgrading to H.264 Simulcast when a crowd joins.',
+  },
+  {
+    icon: Music,
+    title: 'Hi-Fi Music Lounge',
+    text: 'Drop .flac, .mp3, or .wav albums or YouTube Lo-Fi into a vinyl turntable room with spectrum bars and .lrc lyrics.',
   },
   {
     icon: YoutubeIcon,
@@ -538,20 +852,10 @@ const FEATURES = [
     title: 'Ambilight & 6 Cinema Vibes',
     text: 'Live 4-zone bias light glows onto your walls alongside Midnight, True OLED Black, Retro 80s, and Nordic.',
   },
-  {
-    icon: MessageCircle,
-    title: 'Room Chat, GIFs & Toasts',
-    text: 'Full-frame GIPHY search, spoiler-guarded timestamps, emoji picker, replies, and toast alerts when chat is hidden.',
-  },
-  {
-    icon: Smartphone,
-    title: 'Built for Laptop & Phone',
-    text: 'Sleek bottom chat drawers and adaptive camera strips keep the movie large and unobstructed on any screen.',
-  },
 ];
 
 function Features() {
-  const badges = ['Zero upload', '< 0.2 s sync', '48 kHz raw', '4-zone halo', 'Spoiler lock', 'Mobile sheet'];
+  const badges = ['O(1) Swarm', 'Direct P2P', 'Lossless', '< 0.2 s sync', '48 kHz raw', '4-zone halo'];
   return (
     <section id="features" className="mx-auto max-w-6xl scroll-mt-28 px-5 py-20 sm:py-24">
       <SectionHead

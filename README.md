@@ -4,7 +4,7 @@
 
 ### **One screen at the center. Everyone in orbit.**
 
-A 100% free, zero-account, cinema-grade real-time watch-party platform with **Hybrid 4K Local Movie Drop + Live WebRTC Streaming**, **60 fps Low-Latency Screen Share**, **NTP-Synced YouTube Lockstep Playback**, **Real-Time 4-Zone Canvas Ambilight**, and **Studio-Isolated Multi-Track Voice & Camera Chat** across laptop and mobile browsers.
+A 100% free, zero-account, cinema-grade real-time watch-party & music-lounge platform with **Binary-Tree P2P Swarm 4K Movie Delivery**, **2-Person Direct P2P / 3+ H.264 Simulcast 60 fps Screen Share**, **Lossless P2P Music Lounge with `.lrc` Lyrics**, **NTP-Synced YouTube Lockstep**, **Real-Time 4-Zone Canvas Ambilight**, and **Studio-Isolated Voice & Camera Chat** across laptop and mobile browsers.
 
 [![Node](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](#13-local-development-testing--free-tier-deployment)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Monorepo-3178C6?style=flat-square&logo=typescript&logoColor=white)](#5-monorepo-workspace--complete-file-inventory)
@@ -25,9 +25,10 @@ A 100% free, zero-account, cinema-grade real-time watch-party platform with **Hy
 6. [Audio & Video Systems Engineering (Deep Dive)](#6-audio--video-systems-engineering-deep-dive)
    - [6.1 Dual-Track Audio Isolation, RED Prevention & Bluetooth HFP Guard](#61-dual-track-audio-isolation-red-prevention--bluetooth-hfp-guard)
    - [6.2 Unified Single-Element Hardware A/V Lip-Sync & Playout Lock](#62-unified-single-element-hardware-av-lip-sync--playout-lock)
-   - [6.3 Hybrid 4K Local Movie Drop & Live WebRTC Streaming](#63-hybrid-4k-local-movie-drop--live-webrtc-streaming)
-   - [6.4 Low-Latency 60 fps Screen Share Pipeline & Diagnostics](#64-low-latency-60-fps-screen-share-pipeline--diagnostics)
+   - [6.3 Hybrid 4K Local Movie Drop, Binary-Tree P2P Swarm & Live WebRTC Fallback](#63-hybrid-4k-local-movie-drop-binary-tree-p2p-swarm--live-webrtc-fallback)
+   - [6.4 Adaptive 60 fps Screen Share: 2-Way Direct P2P, 3+ H.264 Simulcast & Bitrate Autopilot](#64-adaptive-60-fps-screen-share-2-way-direct-p2p-3-h264-simulcast--bitrate-autopilot)
    - [6.5 Client-Side Subtitle Engine (`.srt` → WebVTT + Dynamic Shifter)](#65-client-side-subtitle-engine-srt--webvtt--dynamic-shifter)
+   - [6.6 Hi-Fi Listen Together Music Lounge, P2P Audio & Synced `.lrc` Lyrics](#66-hi-fi-listen-together-music-lounge-p2p-audio--synced-lrc-lyrics)
 7. [Time Synchronization & YouTube Lockstep Algorithms](#7-time-synchronization--youtube-lockstep-algorithms)
    - [7.1 NTP Minimum-RTT Clock Offset Estimation (`ServerClock`)](#71-ntp-minimum-rtt-clock-offset-estimation-serverclock)
    - [7.2 YouTube Timeline Math, Drift Decision Matrix & Autoplay Recovery](#72-youtube-timeline-math-drift-decision-matrix--autoplay-recovery)
@@ -54,7 +55,7 @@ Most watch-party and conferencing tools either compress audio like a phone call,
 > **The Unshakeable Sound Rule:** Movie and tab audio must travel as untouched **48 kHz stereo (256 kbps Opus)** with voice DSP strictly turned **OFF**, while participant voices travel on a separate channel and are mixed strictly locally on each viewer's device.
 
 1. **Zero Friction Entry:** No accounts, logins, extensions, or downloads. Create a room in one click and share `/r/:roomId`.
-2. **Three Stage Modes Under One Roof:** Seamlessly switch between **60 fps Screen Share**, **Synced YouTube**, and **4K Local Movie Drop** inside the same live session.
+2. **Four Stage Modes Under One Roof:** Seamlessly switch between **60 fps Screen Share**, **Synced YouTube**, **4K Local Movie Drop**, and **Hi-Fi Music Lounge** inside the same live session.
 3. **Desktop & Phone Parity:** Adaptive layouts automatically move camera strips and chat drawers to non-overlapping bottom surfaces on phones while preserving desktop theatre columns.
 4. **100% Free Infrastructure:** Zero paid SaaS dependencies—runs cleanly on free tiers (**Vercel** + **Render** + **LiveKit Cloud Free Tier** or self-hosted **Oracle Cloud Docker** + optional **MongoDB Atlas M0** & **GIPHY**).
 
@@ -68,7 +69,9 @@ Most watch-party and conferencing tools either compress audio like a phone call,
 | **Movie vs. Voice Audio** | Relies on external voice chat | Voice AEC/AGC often pumps music; Nitro needed for high quality | Encoded into single VM stream | **Independent stereo movie track (`red: false`) + mono voice track (`40 kbps`)** |
 | **Bluetooth Headset Bug** | Unhandled by website | Opening headset mic forces OS 8 kHz HFP telephony mode | Unhandled | **Auto-excludes Bluetooth HFP mics, re-asserts stereo constraints & frees hardware on mute** |
 | **A/V Lip-Sync** | Separate from voice overlay | Video & audio jitter buffers can drift apart | Single VM container | **Unified single `<video>` element + locked `120 ms` playout delay on both tracks** |
-| **Local Movie Files** | Not supported | OS window capture only | Requires uploading full file | **Hybrid:** Native `blob:` playback + live WebRTC `H.264` stream to guests/phones OR local 4K copies |
+| **Screen Share Routing** | Server relay | Always routes 2-person shares via SFU | Cloud VM relay | **2-person Direct P2P fast-path (~10–20 ms) + seamless 3+ H.264 Simulcast promotion & bitrate autopilot** |
+| **Local Movie Files** | Not supported | OS window capture only | Requires uploading full file | **Binary-Tree P2P Swarm (`O(1)` host upload, `mp4box.js` fMP4 + MSE) + live H.264 WebRTC fallback** |
+| **Listen Together Music** | Not supported | Compressed voice-bot audio | Requires paid bots | **Bit-exact `.flac`/`.mp3`/`.wav` P2P DataChannel transfer, cover art parser, spectrum bars & `.lrc` lyrics** |
 | **Custom Subtitles** | Locked to platform captions | None | None | **Offline `.srt` → WebVTT parser + real-time `±0.5 s` offset shifter + 4 font scales** |
 | **Theater Immersion** | None | Static dark theme | Plain iframe | **Real-time `32×18` edge-sampling 4-zone Ambilight + 6 non-pink cinema themes** |
 
@@ -83,9 +86,9 @@ flowchart LR
     subgraph Web["Frontend SPA (apps/web · React 19 + Vite + Zustand)"]
         Landing["Landing Page\nOrbital Showcase + Mixer Sim"]
         Room["Room Shell (RoomPage.tsx)\nTopBar + ControlBar + Panels"]
-        Stages["Stage Engines\nScreenStage / LocalStage / YouTubeStage"]
-        Fx["AmbientGlow Canvas\nServerClock + Subtitle Shifter"]
-        Ctrl["RoomController Singleton\ncontroller.ts"]
+        Stages["Stage Engines\nScreenStage / LocalStage / YouTubeStage / MusicStage"]
+        Fx["AmbientGlow Canvas\nServerClock + Subtitles + AudioTags"]
+        Ctrl["RoomController & P2P Engines\ncontroller.ts / p2pMovie / p2pScreen / p2pAudio"]
         Landing --> Room
         Room --> Stages --> Fx
         Room <--> Ctrl
@@ -99,24 +102,32 @@ flowchart LR
         Rest <--> Store
     end
 
-    subgraph Media["LiveKit SFU Media & Data Mesh"]
-        Tracks["Selective Forwarding Media\nScreenShare Video + Stereo Audio\nCamera h360 Simulcast + Mono Voice"]
-        Data["LiveKit DataChannel\nTopic: 'popcorn'\nSync / Chat / Queue / Reactions / Snapshot"]
+    subgraph Media["LiveKit SFU Media & Signaling Bus"]
+        Tracks["Selective Forwarding Media\nScreenShare H.264 Simulcast (3+ Group)\nMovie captureStream Fallback + Camera h360 + Mono Voice"]
+        Data["LiveKit DataChannel ('popcorn')\nSync / Chat / Queue / Reactions / Snapshot\nSDP & ICE Signaling for P2P Swarm, Screen & Music"]
+    end
+
+    subgraph P2P["Direct Browser-to-Browser WebRTC Mesh (Zero SFU Hop)"]
+        P2PMov["P2PMovieManager (fMP4 Binary-Tree Swarm)\nO(1) Host Upload · 32 KB SCTP -> Guest MSE"]
+        P2PScr["DirectScreenShareManager (2-Person Fast-Path)\nDirect H.264/VP8 (~10-20 ms) -> SFU Promote at 3+"]
+        P2PMus["P2PAudioManager ('orbit-music' DataChannel)\nBit-Exact .flac/.mp3/.wav -> Cached Blob URLs"]
     end
 
     Ctrl -- "HTTPS JSON (VITE_API_URL)" --> Rest
     Api -- "RoomServiceClient + AccessToken" --> Media
-    Ctrl <-- "WebRTC SRTP (WSS)" --> Tracks
-    Ctrl <-- "Reliable & Lossy PubSub" --> Data
+    Ctrl <-- "WebRTC SRTP (3+ Group / Voice / Cam)" --> Tracks
+    Ctrl <-- "Reliable & Lossy PubSub + P2P Offers" --> Data
+    Ctrl <-- "Direct DTLS/SRTP & SCTP (ICE STUN)" --> P2P
 ```
 
 ### Design Responsibility Split
 
 | Layer | What It Handles | What It Deliberately Avoids |
 | :--- | :--- | :--- |
-| **`apps/web`** | WebRTC track capture/playback, NTP probing, YouTube IFrame API, `.srt` parsing, `32×18` canvas Ambilight, chat grouping/spoilers | Exposing GIPHY API keys, trusting client role claims without server JWTs |
+| **`apps/web`** | WebRTC track & P2P DataChannel engines (`p2pMovie`, `p2pScreen`, `p2pAudio`, `bitrate`), NTP probing, YouTube IFrame API, `.srt`/ID3/`.lrc` parsing, `32×18` Ambilight | Exposing GIPHY API keys, trusting client role claims without server JWTs |
 | **`apps/api`** | Room creation, salted password verification, waiting-room knocks, signed identity HMACs, LiveKit JWT minting, oEmbed caching, GIPHY proxy | Touching any media bytes, transcoding video/audio, running heavy room timers |
-| **`LiveKit SFU`** | Forwarding encrypted DTLS/SRTP media tracks, enforcing `canPublishSources` & `canUpdateOwnMetadata: false`, relaying `DATA_TOPIC` messages | Persistent storage or server-side media recording |
+| **`LiveKit SFU`** | Forwarding camera/voice + 3+ H.264 Simulcast screen shares & `.mkv` fallbacks, enforcing `canPublishSources` & `canUpdateOwnMetadata: false`, relaying `DATA_TOPIC` signaling | Persistent storage or server-side media recording |
+| **Direct P2P Mesh** | Offloading 4K fMP4 movie swarms (`O(1)` host upload), 2-person ultra-low-latency screen shares (`~10–20 ms`), and lossless Music Lounge audio transfers between peers | Routing through external SFU bandwidth caps when direct STUN/ICE succeeds |
 
 ---
 
@@ -158,6 +169,15 @@ sequenceDiagram
     Guest->>LK: room.connect(url, token) + ServerClock.sync(8 samples)
     Guest->>LK: DataChannel -> { t: 'hello' }
     Host->>LK: isAuthority() == true -> { t: 'snapshot', mode, sync, queue, settings, reactions }
+
+    Note over Host,Guest: 4. Adaptive Stage & P2P DataChannel Plane (signaled via 'popcorn')
+    alt 4K Movie Drop (.mp4/.mov)
+        Host->>Guest: p2p-swarm + p2p-offer -> 32 KB fMP4 Tree (O(1) upload, rescue/SFU fallback)
+    else Screen Share (2-Way P2P -> 3+ Simulcast)
+        Host->>Guest: p2p-screen-offer (2 people) OR promoteHostToSfu() H.264 Simulcast (3+ people)
+    else Hi-Fi Music Lounge (.flac/.mp3/.wav + .lrc)
+        Host->>Guest: music-meta + music-queue + music-p2p-offer ('orbit-music' DataChannel)
+    end
 ```
 
 ### Deterministic Authority Election (`controller.isAuthority()`)
@@ -177,7 +197,7 @@ Popcorn Room/
 │   └── shared/                   # @popcorn/shared — pure TypeScript types, crypto-free helpers & algorithms
 │       └── src/
 │           ├── index.ts          # Role, ParticipantMeta, PublicRoomInfo, LIMITS, hueFromString, parseMeta
-│           ├── messages.ts       # StageMode, RoomTheme, 18 DataMessage types, DATA_TOPIC='popcorn', sortQueue
+│           ├── messages.ts       # StageMode ('music' incl.), RoomTheme, MusicTrackItem, P2P & Sync DataMessages
 │           ├── sync.ts           # SyncState, DRIFT, expectedPosition, msUntilStart, decideDrift, computeOffset
 │           ├── youtube.ts        # parseYouTubeId, parseYouTubeStart, ytThumb
 │           └── sync.test.ts      # 18 Vitest unit tests
@@ -197,21 +217,26 @@ Popcorn Room/
 │           ├── index.css         # Tailwind tokens, orbital keyframes, 6 [data-theme] skins, .butter-btn
 │           ├── main.tsx          # React Router & Sonner toast provider bootstrap
 │           ├── pages/
-│           │   ├── Landing.tsx   # Orbital hero showcase, live theme/mode preview, mixer simulator, CreateRoom
+│           │   ├── Landing.tsx   # Orbital hero showcase, UpgradesShowcase cards, Mixer simulator, CreateRoom
 │           │   └── RoomPage.tsx  # Stage container, global file drop overlay, wall Ambilight, Dark Join gate
 │           ├── room/
 │           │   └── controller.ts # RoomController singleton managing WebRTC, media tracks, mixing & data bus
+│   │           │   ├── p2pMovie.ts   # Binary-tree P2P Swarm fMP4 streamer (mp4box.js + MSE lookahead & eviction)
+│   │           │   ├── p2pScreen.ts  # 2-person Direct P2P screen share fast-path + SFU Simulcast promoter
+│   │           │   ├── p2pAudio.ts   # Bit-exact .flac/.mp3/.wav WebRTC DataChannel audio distributor
+│   │           │   └── bitrate.ts    # SDP x-google bitrate munger + 4s sender BWE/loss autopilot
 │           ├── store/
 │           │   └── room.ts       # Zustand useRoom state store + localStorage audio/UI defaults
 │           ├── lib/
 │           │   ├── api.ts        # Fetch client with VITE_API_URL & 2 MB speedtest probe
+│   │           │   ├── audioTags.ts  # Zero-dep ID3v2 / FLAC / M4A metadata + cover extractor & .lrc parser
 │           │   ├── browser.ts    # Browser/OS matrix & screen-audio capability flags (caps)
 │           │   ├── clock.ts      # ServerClock NTP poller
 │           │   ├── fullscreen.ts # Cross-browser fullscreen helpers
 │           │   ├── session.ts    # Per-room secrets & user prefs in localStorage
 │           │   ├── subtitles.ts  # Offline .srt -> WEBVTT parser & cue time-shifter
 │           │   └── utils.ts      # cn(), uid(), initials(), timeOfDay(), isTypingTarget()
-│           └── components/       # UI modules: stages, strips, chat, queue, mixer, themes, dialogs, HUD
+│           └── components/       # UI modules: ScreenStage, LocalStage, YouTubeStage, MusicStage, HUD, chat, mixer
 ├── infra/
 │   ├── DEPLOYMENT.md             # Free-tier deploy instructions
 │   ├── Dockerfile.api            # Production Node API Docker build
@@ -264,34 +289,43 @@ flowchart LR
 
 ---
 
-### 6.3 Hybrid 4K Local Movie Drop & Live WebRTC Streaming
+### 6.3 Hybrid 4K Local Movie Drop, Binary-Tree P2P Swarm & Live WebRTC Fallback
 
-**The Orbit** solves the classic local-file watch-party trade-off ("everyone must download the file" vs. "gigabyte server uploads") using a hybrid architecture:
+**The Orbit** eliminates both "everyone must pre-download a 10 GB file" and "host upload melts down with 8 viewers" using a **progressive fMP4 Binary-Tree P2P Swarm** (`P2PMovieManager` in [p2pMovie.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/room/p2pMovie.ts)) with zero-effort LiveKit fallback:
 
 ```mermaid
 flowchart TD
-    Drop["Host Drops .mp4 / .mkv / .webm File"] --> Blob["URL.createObjectURL(file)\nPlays 100% Native on Host"]
-    Blob --> Playing["onPlaying fires -> video.captureStream()\nUncapped native FPS + Stereo Audio"]
-    Playing --> Pub["Promise.all Parallel Publish (stream: 'local-movie')\nVideo: H.264 single-stream @ 7.5 Mbps (backupCodec: false)\nAudio: Opus 256 kbps stereo (red: false, AEC/NS/AGC = false)"]
-    Pub --> GuestCheck{"Does Guest have\nlocal file loaded?"}
-    GuestCheck -- "No (Phone / Instant Join)" --> LiveStream["Auto-plays Host Stream on ONE video tag\n(Ambilight + Fullscreen + Mixer Volume)"]
-    GuestCheck -- "Yes (Use Local 4K Copy)" --> LocalSync["True 1.0x Local File Sync\n0ms play lead · 1400ms startup grace · Seek if drift > 1.5s"]
+    Drop["Host Drops .mp4 / .m4v / .mov File"] --> Parse["mp4box.js Progressive Parser\n1 MB slices · nbSamples=30 · rapAlignement"]
+    Parse -->|"O(1) Host Upload (SWARM_DEGREE = 2)"| Tree["Binary-Tree Relay Peers\nHost -> G0, G1 -> G2..G5 (32 KB SCTP chunks + 8 MB cache)"]
+    Tree --> MSE["Guest MediaSource (MSE)\n14-22 s lookahead · auto-evicts > 28 s behind"]
+    Tree -.->|"Upstream stalls > 2.8 s"| Rescue["NAT Auto-Rescue (p2p-need-direct)\nDirect host fast-path"]
+    Drop -->|".mkv/.webm or ICE blocked (4.5 s)"| SFU["LiveKit H.264 captureStream Fallback\nSingle stream @ 7.5 Mbps + 256 kbps stereo Opus"]
 ```
 
-- **Why Parallel `Promise.all` + `H.264`:** Publishing video first and audio sequentially introduced SDP round-trip drift, and dual-codec simulcast (`32 Mbps`) choked Wi-Fi. Publishing both tracks in parallel under `stream: 'local-movie'` with hardware-friendly `H.264` (`7.5 Mbps`, auto `scaleResolutionDownBy` above `1920px` for 4K files, `maintain-resolution`, `backupCodec: false`) keeps phones smooth and tightly synced.
-- **Why True `1.0×` Local File Sync Has Zero Speed-Up:** `controller.play()` commits `leadTime = 0 ms` (`serverTime: clock.now()`). `LocalStage.tsx` locks `v.playbackRate = sync.rate || 1` on `loadedmetadata`, `pause`, and `play` (never calling rate-nudge `1.04×`/`0.96×`), preventing fast/chipmunk music after start or pause/resume. Only drifts `> 1.5 s` after a `1400 ms` startup grace window trigger a hard seek.
+- **`O(1)` Host Bandwidth (`SWARM_DEGREE = 2`):** The host segments `.mp4`/`.m4v`/`.mov` files progressively (`FILE_READ_BYTES = 1 MB`) using `mp4box.js` without buffering the whole movie in RAM, transmitting initialization (`MSG_INIT`) and media (`MSG_MEDIA`) boxes in `32 KB` SCTP frames (`13 B` binary header `[1B type][4B trackId][4B msgId][2B chunkIdx][2B totalChunks]`) to **at most 2 root children**. Each peer at index `idx` forwards from an `8 MB` rolling packet cache (`SWARM_MEDIA_CACHE_BYTES`) to `[2*idx + 2, 2*idx + 3]`.
+- **MSE Lookahead, Backpressure & Memory Eviction:** Guests append segments into per-track `MediaSource` `SourceBuffer`s inside a bounded `14–22 s` buffer-ahead window (`BUFFER_AHEAD_LOW_S = 14`, `BUFFER_AHEAD_HIGH_S = 22`), throttling upstream via flow-control pauses (`{ kind: 'flow', pause }`) and DataChannel watermarks (`DC_HIGH_WATER = 8 MB`, `DC_LOW_WATER = 2 MB`), while evicting watched segments (`EVICT_BEHIND_S = 28 s`, keeping `22 s`) so long 4K movies never exhaust mobile RAM.
+- **NAT Auto-Rescue & Transparent Fallbacks:** If an upstream relay stalls past `SWARM_DIRECT_RESCUE_MS = 2800 ms`, the guest emits `p2p-need-direct` to pull directly from the host. If the container is non-fMP4 (`.mkv`/`.webm`) or NAT blocks P2P (`P2P_CONNECT_TIMEOUT_MS = 4500 ms`), the room seamlessly switches to parallel `Promise.all` `LiveKit H.264` (`captureStream()`, `7.5 Mbps`, `maintain-resolution`, `backupCodec: false`) + `256 kbps` stereo Opus (`red: false`).
+- **True `1.0×` Sync Without Pitch Shift:** If guests also load their own local file copy, `LocalStage.tsx` locks `playbackRate = sync.rate || 1` with zero speed nudging (`0 ms` play lead, `1400 ms` startup grace, hard seek only when drift `> 1.5 s`).
 
 ---
 
-### 6.4 Low-Latency 60 fps Screen Share Pipeline & Diagnostics
+### 6.4 Adaptive 60 fps Screen Share: 2-Way Direct P2P, 3+ H.264 Simulcast & Bitrate Autopilot
 
-Implemented in `controller.startShare()` and [ScreenStage.tsx](file:///d:/Projects/Popcorn%20Room/apps/web/src/components/ScreenStage.tsx):
+Implemented across `controller.startShare()`, [p2pScreen.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/room/p2pScreen.ts), [bitrate.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/room/bitrate.ts), and [ScreenStage.tsx](file:///d:/Projects/Popcorn%20Room/apps/web/src/components/ScreenStage.tsx):
 
-- **Codec & Framerate:** Single-stream **`videoCodec: 'vp8'`** (`backupCodec: false`, `simulcast: false`, `contentHint: 'motion'`, `degradationPreference: 'balanced'`), avoiding Windows hybrid-GPU `OpenH264` CPU fallback stalls and `VP9` >1 s encoder queues. Defaults to **`share60 = true` (`1920×1080 @ 60 fps`, `6.0 Mbps`; switchable to `30 fps`, `4.5 Mbps` in Mixer)**.
-- **HiDPI Scale Protection:** Checks `mst.getSettings().width`; if OS DPI scaling captures above `1920px`, applies `scaleResolutionDownBy` automatically on `RTCRtpSender`.
-- **Upload Probe (`POST /api/speedtest`):** Sends a 2 MB binary buffer on first share to warn (`slowUpload`) if upload speed is under `8 Mbps` (60 fps) or `5 Mbps` (30 fps).
-- **Audio & DRM Watchers:** Checks for missing `ScreenShareAudio` (`noShareAudio`) and runs a `32×18` canvas sampler every `2 s` (`startBlackFrameDetector`) to detect DRM black-frames (`maxLuminance < 10` for 3 ticks).
-- **Host GPU Conservation & Ref Stability:** `setVideoNode` is memoized via `useCallback` to eliminate render-driven track detach/attach blinking loops; `AmbientGlow` skips on presenter self-preview, and hosts can toggle **Hide Preview (Save GPU)** at any time.
+```mermaid
+flowchart LR
+    Cap["Display Capture\n1920x1080 @ 60 fps (10 Mbps) or 30 fps (6.5 Mbps)\n+ 256 kbps Stereo Audio"] --> Check{"Room Size?"}
+    Check -- "2 People (remoteCount == 1)" --> Direct["DirectScreenShareManager\nZero SFU hop (~10-20 ms latency)\nSDP munge + 4s Bitrate Autopilot"]
+    Direct -.->|"3rd guest joins or ICE > 3.8 s"| Promote["promoteHostToSfu()\nHands off live MediaStream\nZero second picker prompt"]
+    Check -- "3+ People (remoteCount >= 2)" --> Promote
+    Promote --> SFU["LiveKit H.264 Simulcast\nmaintain-framerate · mobile 4G steps down cleanly"]
+```
+
+- **2-Person Direct P2P Fast-Path (`DirectScreenShareManager`):** When sharing to a single guest (`remoteCount === 1`), video and stereo audio bypass the LiveKit SFU over a direct `RTCPeerConnection` (~10–20 ms latency) with SDP start/min/max hints (`mungeVideoBitrate(sdp, 6000, 2500, 12000)` kbps) so frames start razor-sharp immediately instead of ramping slowly from `300 kbps`.
+- **Seamless 3+ H.264 Simulcast Promotion (`promoteHostToSfu`):** When a 3rd participant joins mid-share or direct P2P ICE fails (`DIRECT_CONNECT_TIMEOUT_MS = 3800 ms`), the presenter automatically hands off the **already-captured** `MediaStream` to LiveKit SFU with **`videoCodec: 'h264'`**, **`simulcast: true`**, `degradationPreference: 'maintain-framerate'`, and `10 Mbps` (`60 fps`) / `6.5 Mbps` (`30 fps`) ceiling—so guests on mobile 4G receive adaptive sub-layers without asking the host to re-pick their window.
+- **4-Second RTCRtpSender Bitrate Autopilot (`startBitrateAutopilot`):** Waits `8 s` (`2 ticks`) for WebRTC BWE warmup, then polls `sender.getStats()` every `4 s`. Tracks `availableOutgoingBitrate` (`target = avail * 0.82`) and `remote-inbound-rtp` packet loss (`> 3%` scales down `0.85×`, clamped at `3–3.5 Mbps` floor) to eliminate Wi-Fi router bufferbloat while preserving clarity.
+- **Diagnostics & Host GPU Conservation:** Runs HiDPI `scaleResolutionDownBy` protection above `1920px`, 2 MB `POST /api/speedtest` upload probing, `32×18` black-frame DRM detection (`maxLuminance < 10`), memoized `setVideoNode` refs, and **Hide Preview (Save GPU)**.
 
 ---
 
@@ -302,6 +336,27 @@ Implemented completely offline in [subtitles.ts](file:///d:/Projects/Popcorn%20R
 1. **`srtToVtt()` Pipeline:** Strips UTF-8 BOM (`\uFEFF`), normalizes `\r\n`/`\r` line breaks to `\n`, converts SubRip comma timestamps (`00:01:20,500` → `00:01:20.500`), promotes shorthand timestamps (`01:20,500` → `00:01:20.500`), and prepends `WEBVTT\n\n`.
 2. **Real-Time Offset Shifting (`shiftVtt`):** Supports `±0.5 s` live sync adjustments in `LocalStage`, parsing `-->` spans, clamping `>= 0`, formatting `HH:MM:SS.mmm`, regenerating a `Blob` (`text/vtt`), and revoking the previous `ObjectURL` to prevent memory leaks.
 3. **Typography:** Supports toggleable `CC` and 4 size presets (`subtitles-sm`, `subtitles-md`, `subtitles-lg`, `subtitles-xl`).
+
+---
+
+### 6.6 Hi-Fi Listen Together Music Lounge, P2P Audio & Synced `.lrc` Lyrics
+
+Implemented in [p2pAudio.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/room/p2pAudio.ts), [audioTags.ts](file:///d:/Projects/Popcorn%20Room/apps/web/src/lib/audioTags.ts), and [MusicStage.tsx](file:///d:/Projects/Popcorn%20Room/apps/web/src/components/MusicStage.tsx):
+
+```mermaid
+flowchart LR
+    Drop["Drop .flac/.mp3/.wav/.m4a or .lrc / YT URL"] --> Tags["extractAudioTags()\nID3v2 / FLAC / M4A -> 512px Cover Art"]
+    Tags --> Meta["Broadcast music-meta + music-queue\n& music-lrc via LiveKit DataChannel"]
+    Drop --> P2P["P2PAudioManager ('orbit-music' DC)\n32 KB chunks · 4 MB high / 512 KB low water"]
+    P2P --> Blob["Listener Cached blob: URL\n+ NTP expectedPosition() Lockstep"]
+    Blob --> Stage["MusicStage.tsx\nWeb Audio 128-bin AnalyserNode (48 Bars)\n+ Sliding Vinyl Sleeve & Auto-Scroll .lrc"]
+```
+
+- **Bit-Exact Lossless P2P File Streaming (`P2PAudioManager`):** Hosts drag-and-drop or browse local `.flac`, `.mp3`, `.wav`, `.m4a`, `.aac`, `.ogg`, or `.opus` tracks (or queue YouTube URLs). Files stream byte-for-byte in ordered `32 KB` chunks over `'orbit-music'` WebRTC DataChannels (`DC_HIGH_WATER = 4 MB`, `DC_LOW_WATER = 512 KB`) directly into cached listener `blob:` URLs—no recompression or quality loss. Latecomers receive the active track automatically (`sendActiveToNewPeer`).
+- **Zero-Dependency Metadata & Cover Extraction (`extractAudioTags`):** Parses MP3 ID3v2 (`TIT2`, `TPE1`, `APIC`), FLAC (`VORBIS_COMMENT` + `PICTURE` blocks), and M4A/MP4 (`moov/udta/meta/ilst` `©nam`, `©ART`, `covr` atoms) cleanly in the browser, resizing album art to a crisp `512×512` JPEG DataURL.
+- **Vinyl-Sleeve Canvas Visualizer & Synced `.lrc` Engine (`MusicStage.tsx` + `parseLrc`):**
+  - Connects local playback to a `128`-bin Web Audio `AnalyserNode` (`fftSize = 128`, `smoothingTimeConstant = 0.8`) driving a 48-bar monochrome vertical spectrum canvas + subtle bass-breathing poster aura + smoothly spinning vinyl disc preview.
+  - Supports drag-and-drop `.lrc` lyric files parsed with timestamp support (`[mm:ss.xxx]`), live auto-scrolling active lines, NTP-locked sync checks (`0.35 s` seek snap when paused, `0.65 s` local / `1.5 s` YouTube drift thresholds via `expectedPosition()`), Smart Ducking support, and `AudioContext` mobile unlock recovery.
 
 ---
 
@@ -381,7 +436,7 @@ flowchart TD
 
 ### 8.4 Landing Experience, Chat, Queue, Recap Heatmap & Keyboard Shortcuts
 
-- **Landing Page (`Landing.tsx`):** Orbital ring hero lifted cleanly above the fold (`One screen at the center. Everyone in orbit.`), interactive Theater Showcase (mode + theme switcher + heatmap bars), animated **Orbit Architecture**, **6 Feature Cards**, live **Dual-Track Mixer Simulator** (interactive Movie/Voice sliders + `Smart Duck` toggle), horizontal trajectory **How it Works**, Browser Support badges, and `CreateRoomDialog`.
+- **Landing Page (`Landing.tsx`):** Orbital ring hero lifted cleanly above the fold (`One screen at the center. Everyone in orbit.`), interactive 4-mode Theater Showcase (`Share Screen`, `YouTube Sync`, `4K Drop`, `Music Lounge`), `<UpgradesShowcase />` interactive architecture cards (Binary-Tree P2P Swarm, 2-way P2P vs. 3+ Simulcast toggle, and interactive Music Lounge Play/Pause preview), **Orbit Architecture**, **6 Feature Cards**, live **Dual-Track Mixer Simulator**, horizontal **How it Works**, and `CreateRoomDialog`.
 - **Chat (`ChatTab.tsx` & `ChatToastOverlay.tsx`):** 2-minute message grouping, quote replies, inline 24-emoji pad, uncropped 2-column masonry GIPHY search (`Trending`, `Popcorn`, `Laugh`, `Shocked`, `Clap`, `Love`, `Dance`), YouTube timeline **Spoiler Lock** (`vt` hides messages posted ahead of viewer's playhead until revealed or reached), copy button, jump-to-latest pill, and toast notifications when chat is closed.
 - **Queue & Recap (`QueueTab.tsx` & `RecapDialog`):** Upvote-sorted YouTube queue (`votes.length` desc → `addedAt` asc), **Everyone Ready?** check, `3-2-1` countdown launch, and a **12-bin timeline reaction heatmap** summarizing peak party moments.
 - **Keyboard Shortcuts:** `F` Fullscreen · `T` Theatre Mode · `Esc` Exit Theatre / Fullscreen / Collapse Panel · `Space` Local Play/Pause or Voice Push-to-Talk · `←`/`→` Local Skip ±10 s · `M` Local Mute.
@@ -447,8 +502,13 @@ All reactive room state lives in the Zustand store (`apps/web/src/store/room.ts`
 | `hello` | — | Broadcast on room connect; authority answers with `snapshot` |
 | `snapshot` | `mode`, `sync`, `queue`, `settings`, `sessionStart`, `reactions` | Sets initial room state on joining peer |
 | `sync` | `state: SyncState` | Updates play/pause/seek/video/rate/version from authorized controller |
-| `mode` | `mode: StageMode` | Switches stage between `'idle'`, `'screen'`, `'youtube'`, `'local'` |
+| `mode` | `mode: StageMode` | Switches stage between `'idle'`, `'screen'`, `'youtube'`, `'local'`, `'music'` |
 | `local-meta` | `fileName`, `fileSize?`, `duration?` | Announces host's local movie filename & metadata |
+| `p2p-ready` / `p2p-swarm` | `fileName`, `fileSize`, `duration?` / `hostId`, `peers` | Announces fMP4 readiness & assigns binary-tree relay positions (`O(1)` host upload) |
+| `p2p-offer` / `answer` / `ice` / `need-direct` / `fallback` | `to`, `sdp` / `candidate` | WebRTC DataChannel negotiation, NAT auto-rescue, and LiveKit fallback |
+| `p2p-screen-offer` / `answer` / `ice` / `stop` / `fallback` | `to`, `sdp` / `candidate` | 2-person Direct P2P screen share signaling & 3+ SFU promotion signal |
+| `music-meta` / `music-queue` / `music-lrc` | `trackId`, `tracks`, `activeId`, `coverDataUrl?`, `lrc?` | Syncs Music Lounge queue, parsed tags, cover art, and `.lrc` lyrics |
+| `music-p2p-offer` / `answer` / `ice` | `to`, `sdp`, `trackId`, `fileName`, `fileSize`, `mime` | Ordered WebRTC DataChannel signaling for lossless audio file delivery |
 | `theme` | `theme: RoomTheme` | Syncs host-selected cinema theme across room |
 | `settings` | `settings: RoomSettings` | Syncs `openControl` & `autoPauseOnBuffer` |
 | `waiting` | `names: string[]` | Shows/clears buffering wait banner |
