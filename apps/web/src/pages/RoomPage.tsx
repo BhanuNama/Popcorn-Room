@@ -431,13 +431,13 @@ export default function RoomPage() {
             aria-label="Watch party stage"
             className={cn(
               'relative flex flex-1 overflow-hidden min-w-0 transition-all',
-              cameraLayout === 'bottom' ? 'flex-col' : 'flex-col md:flex-row',
+              cameraLayout === 'side' ? 'flex-col md:flex-row' : 'flex-col',
               isImmersive
                 ? 'rounded-none p-0 bg-black'
                 : 'rounded-2xl sm:rounded-3xl border border-white/[0.08] bg-ink-950/35 p-1.5 sm:p-2 gap-2 backdrop-blur-xl shadow-[0_24px_80px_-24px_rgba(0,0,0,0.85)]',
             )}
           >
-            {/* The Video Stage: YouTube, Local Movie File, or Screen Share */}
+            {/* The Video Stage: YouTube, Local Movie File, Music, or Screen Share */}
             <div
               className={cn(
                 'relative flex-1 min-w-0 min-h-[200px] overflow-hidden rounded-xl sm:rounded-2xl flex items-center justify-center ring-1 ring-white/[0.05]',
@@ -454,30 +454,26 @@ export default function RoomPage() {
                 <ScreenStage />
               )}
               <ReactionsOverlay />
+
+              {/* Floating Top-Left "Show People" Pill when Camera Strip is hidden in Normal View (zero stage space taken) */}
+              {cameraLayout === 'hidden' && !isImmersive && people.length > 0 && (
+                <button
+                  onClick={() =>
+                    useRoom.getState().setUi({
+                      cameraLayout: window.innerWidth < 768 ? 'bottom' : 'side',
+                    })
+                  }
+                  className="butter-btn absolute top-3 left-3 z-30 flex items-center gap-1.5 rounded-full bg-ink-950/80 hover:bg-ink-900/95 px-3 py-1.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/15 backdrop-blur-md shadow-float transition"
+                  title="Show People & cameras"
+                >
+                  <Users size={12} className="text-coral-400" />
+                  <span>Show People ({people.length})</span>
+                </button>
+              )}
             </div>
 
             {/* Member Cameras: Bottom Shelf on Mobile (or Desktop Bottom), Side Column on Desktop */}
-            {cameraLayout !== 'hidden' ? (
-              <CameraStrip layout={cameraLayout} />
-            ) : (
-              !isImmersive &&
-              people.length > 0 && (
-                <div className="flex items-center justify-center shrink-0 pt-0.5">
-                  <button
-                    onClick={() =>
-                      useRoom.getState().setUi({
-                        cameraLayout: window.innerWidth < 768 ? 'bottom' : 'side',
-                      })
-                    }
-                    className="butter-btn flex items-center gap-1.5 rounded-full bg-white/[0.07] hover:bg-white/[0.13] px-3.5 py-1 text-[11px] font-semibold text-white/85 ring-1 ring-white/12 transition"
-                    title="Show People & cameras"
-                  >
-                    <Users size={12} className="text-coral-400" />
-                    <span>Show People ({people.length})</span>
-                  </button>
-                </div>
-              )
-            )}
+            {cameraLayout !== 'hidden' && <CameraStrip layout={cameraLayout} />}
           </section>
 
           {/* Right Panel (Chat, People, Queue) - Auto-resizes stage width */}
