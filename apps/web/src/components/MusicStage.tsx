@@ -88,6 +88,15 @@ export function MusicStage() {
     try {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new AudioCtx();
+      // NEVER connect createMediaElementSource while AudioContext is suspended —
+      // otherwise Chrome routes <audio> into a silent suspended graph even when el.play() resolves!
+      if (ctx.state === 'suspended') {
+        void ctx.resume().catch(() => {});
+      }
+      if (ctx.state !== 'running') {
+        void ctx.close().catch(() => {});
+        return null;
+      }
       const src = ctx.createMediaElementSource(el);
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 128;
@@ -102,6 +111,19 @@ export function MusicStage() {
       return null;
     }
   };
+
+  // Self-healing guest fetch: if an active local track has arrived via metadata/queue without audio yet, request it
+  useEffect(() => {
+    if (!activeTrack || activeTrack.source !== 'local' || activeLocalUrl) return;
+    if (controller.p2pAudio.hasHostFile(activeTrack.id)) return;
+    controller.requestMusicTrack(activeTrack.id);
+    const timer = window.setInterval(() => {
+      if (!useRoom.getState().musicLocalUrls[activeTrack.id]) {
+        controller.requestMusicTrack(activeTrack.id);
+      }
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [activeTrack?.id, activeTrack?.source, activeLocalUrl]);
 
   useEffect(() => {
     const effectiveDuck = smartDuck ? (duck < 0.95 ? 0.7 : 1) : 1;
@@ -138,12 +160,16 @@ export function MusicStage() {
         const exp = expectedPosition(st, clock.offsetMs);
         if (el.paused) {
           if (el.readyState >= 1 && Math.abs(el.currentTime - exp) > 0.35) el.currentTime = exp;
-          ensureAnalyser(el);
-          void el.play().catch((err) => {
-            if (err?.name === 'NotAllowedError') {
-              setAudioBlocked(true);
-            }
-          });
+          void el
+            .play()
+            .then(() => {
+              setAudioBlocked(false);
+            })
+            .catch((err) => {
+              if (err?.name === 'NotAllowedError') {
+                setAudioBlocked(true);
+              }
+            });
         } else if (el.readyState >= 2 && Math.abs(el.currentTime - exp) > 0.65) {
           el.currentTime = exp;
         }
@@ -153,9 +179,11 @@ export function MusicStage() {
     tick();
     const timer = window.setInterval(tick, 1000);
     el.addEventListener('canplay', tick);
+    el.addEventListener('loadeddata', tick);
     return () => {
       window.clearInterval(timer);
       el.removeEventListener('canplay', tick);
+      el.removeEventListener('loadeddata', tick);
     };
   }, [activeTrack?.id, activeTrack?.source, activeLocalUrl, sync]);
 
@@ -217,6 +245,7 @@ export function MusicStage() {
 
     mountYt();
 
+    let unstartedTicks = 0;
     const syncYt = window.setInterval(() => {
       const p = ytPlayerRef.current;
       if (!p || !ytReadyRef.current || typeof p.getCurrentTime !== 'function') return;
@@ -227,11 +256,23 @@ export function MusicStage() {
       if (Number.isFinite(cur)) setCurrentTime(cur);
 
       if (st.status === 'paused') {
+        unstartedTicks = 0;
         if (p.getPlayerState() === 1) p.pauseVideo();
         if (Math.abs(cur - st.position) > 1.2) p.seekTo(st.position, true);
       } else if (st.status === 'playing') {
         const exp = expectedPosition(st, clock.offsetMs);
-        if (p.getPlayerState() !== 1) p.playVideo();
+        const state = p.getPlayerState();
+        if (state === 1) {
+          unstartedTicks = 0;
+        } else {
+          p.playVideo();
+          if (state !== 3) unstartedTicks++;
+          if (unstartedTicks === 2) {
+            p.mute();
+            p.playVideo();
+            setAudioBlocked(true);
+          }
+        }
         if (Math.abs(cur - exp) > 1.5) p.seekTo(exp, true);
       }
     }, 900);
@@ -329,12 +370,22 @@ export function MusicStage() {
   };
 
   const togglePlay = () => {
+    if (audioRef.current) {
+      ensureAnalyser(audioRef.current);
+    }
     if (!isController) {
-      if (audioRef.current) {
+      if (activeTrack?.source === 'local' && audioRef.current) {
         audioRef.current.muted = false;
         setAudioBlocked(false);
-        ensureAnalyser(audioRef.current);
+        const exp = expectedPosition(useRoom.getState().sync, clock.offsetMs);
+        if (audioRef.current.readyState >= 1 && Math.abs(audioRef.current.currentTime - exp) > 0.35) {
+          audioRef.current.currentTime = exp;
+        }
         void audioRef.current.play().catch(() => {});
+      } else if (activeTrack?.source === 'youtube' && ytPlayerRef.current && ytReadyRef.current) {
+        setAudioBlocked(false);
+        ytPlayerRef.current.unMute();
+        ytPlayerRef.current.playVideo();
       }
       return;
     }
@@ -359,6 +410,9 @@ export function MusicStage() {
       }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
+      onPointerDownCapture={() => {
+        if (audioRef.current && !audioRef.current.paused) ensureAnalyser(audioRef.current);
+      }}
       className="relative flex h-full w-full flex-col lg:flex-row overflow-y-auto lg:overflow-hidden rounded-2xl bg-[#090a0f] text-white"
     >
       <audio
@@ -373,7 +427,7 @@ export function MusicStage() {
         }}
         className="hidden"
       />
-      <div ref={ytContainerRef} className="pointer-events-none fixed -left-[9999px] h-px w-px opacity-0" />
+      <div ref={ytContainerRef} className="pointer-events-none fixed bottom-0 right-0 h-16 w-16 opacity-0" />
 
       <input
         ref={fileInputRef}
@@ -546,9 +600,22 @@ export function MusicStage() {
                 </button>
               </div>
             )}
-            {activeTrack?.source === 'local' && activeProgress !== undefined && activeProgress < 100 && (
+            {activeTrack?.source === 'local' && !activeLocalUrl && (
               <div className="mt-1.5 text-[11px] font-medium text-white/60">
-                Buffering lossless audio P2P… {activeProgress}%
+                {activeProgress !== undefined && activeProgress > 0 && activeProgress < 100
+                  ? `Receiving lossless audio… ${activeProgress}%`
+                  : 'Syncing track from host…'}
+              </div>
+            )}
+            {audioBlocked && (
+              <div className="mt-2.5 flex justify-center">
+                <button
+                  type="button"
+                  onClick={togglePlay}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-white px-4 py-1.5 text-xs font-semibold text-black shadow-lg animate-pulse hover:bg-white/90 cursor-pointer"
+                >
+                  <Volume2 size={14} /> Tap to Enable Sound
+                </button>
               </div>
             )}
           </div>

@@ -126,9 +126,13 @@ export type DataMessage =
     }
   | { t: 'music-queue'; tracks: MusicTrackItem[]; activeId: string | null }
   | { t: 'music-lrc'; trackId: string; lrc: string }
+  | { t: 'music-need'; trackId: string }
   | { t: 'music-p2p-offer'; to: string; sdp: string; trackId: string; fileName: string; fileSize: number; mime: string }
   | { t: 'music-p2p-answer'; to: string; sdp: string }
-  | { t: 'music-p2p-ice'; to: string; candidate: { candidate?: string; sdpMid?: string | null; sdpMLineIndex?: number | null } };
+  | { t: 'music-p2p-ice'; to: string; candidate: { candidate?: string; sdpMid?: string | null; sdpMLineIndex?: number | null } }
+  | { t: 'music-relay-start'; to: string; trackId: string; fileName: string; fileSize: number; mime: string }
+  | { t: 'music-relay-chunk'; to: string; trackId: string; seq: number; data: string }
+  | { t: 'music-relay-eof'; to: string; trackId: string };
 
 export const DATA_TOPIC = 'popcorn';
 

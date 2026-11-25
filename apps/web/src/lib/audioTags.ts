@@ -56,19 +56,27 @@ async function compressCoverBlob(blob: Blob): Promise<string | undefined> {
       el.onerror = reject;
       el.src = url;
     });
-    const size = 512;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return undefined;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    const scale = Math.max(size / img.width, size / img.height);
-    const w = img.width * scale;
-    const h = img.height * scale;
-    ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
-    return canvas.toDataURL('image/jpeg', 0.9);
+    // Keep DataURL compact (< 9.5 KB) so LiveKit publishData packets never overflow SCTP/SFU caps
+    for (const [size, quality] of [
+      [224, 0.72],
+      [176, 0.62],
+      [128, 0.52],
+    ] as const) {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return undefined;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      const scale = Math.max(size / img.width, size / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      const out = canvas.toDataURL('image/jpeg', quality);
+      if (out.length <= 9500 || size === 128) return out;
+    }
+    return undefined;
   } catch {
     return undefined;
   } finally {

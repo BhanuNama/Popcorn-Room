@@ -456,7 +456,9 @@ class RoomController {
     if (this.isAuthority()) {
       this.send(this.snapshot(), [p.identity]);
       if (musicQueue.length > 0) {
-        void this.send({ t: 'music-queue', tracks: musicQueue, activeId: musicActiveId }, [p.identity]);
+        this.sendCompactMusicQueue(musicQueue, musicActiveId, [p.identity]);
+        const active = musicQueue.find((t) => t.id === musicActiveId);
+        if (active) this.sendMusicMeta(active, [p.identity]);
       }
     }
     if (this.p2pMovie.isHostActive()) {
@@ -466,7 +468,7 @@ class RoomController {
       this.p2pScreen.promoteHostToSfu();
     }
     if (musicActiveId && this.p2pAudio.hasHostFile(musicActiveId)) {
-      void this.p2pAudio.sendActiveToNewPeer(p.identity);
+      void this.p2pAudio.sendTrackByIdToPeer(p.identity, musicActiveId);
     }
   }
 
@@ -512,9 +514,21 @@ class RoomController {
     const st = useRoom.getState();
     const meta = parseMeta(p.metadata);
     switch (m.t) {
-      case 'hello':
-        if (this.isAuthority()) this.send(this.snapshot(), [p.identity]);
+      case 'hello': {
+        const { musicQueue, musicActiveId } = useRoom.getState();
+        if (this.isAuthority()) {
+          this.send(this.snapshot(), [p.identity]);
+          if (musicQueue.length > 0) {
+            this.sendCompactMusicQueue(musicQueue, musicActiveId, [p.identity]);
+            const active = musicQueue.find((t) => t.id === musicActiveId);
+            if (active) this.sendMusicMeta(active, [p.identity]);
+          }
+        }
+        if (musicActiveId && this.p2pAudio.hasHostFile(musicActiveId)) {
+          void this.p2pAudio.sendTrackByIdToPeer(p.identity, musicActiveId);
+        }
         break;
+      }
       case 'snapshot': {
         const first = !this.gotSnapshot;
         this.gotSnapshot = true;
@@ -637,11 +651,22 @@ class RoomController {
         }
         break;
       case 'music-queue':
-        useRoom.setState({ musicQueue: m.tracks, musicActiveId: m.activeId });
+        useRoom.setState((s) => ({
+          musicActiveId: m.activeId,
+          musicQueue: m.tracks.map((incoming) => {
+            const prev = s.musicQueue.find((t) => t.id === incoming.id);
+            return {
+              ...incoming,
+              coverDataUrl: incoming.coverDataUrl ?? prev?.coverDataUrl,
+              lrc: incoming.lrc ?? prev?.lrc,
+            };
+          }),
+        }));
         break;
       case 'music-meta': {
         useRoom.setState((s) => {
           const exists = s.musicQueue.some((t) => t.id === m.trackId);
+          const prev = s.musicQueue.find((t) => t.id === m.trackId);
           const item: MusicTrackItem = {
             id: m.trackId,
             title: m.title,
@@ -651,8 +676,8 @@ class RoomController {
             fileName: m.fileName,
             fileSize: m.fileSize,
             duration: m.duration,
-            coverDataUrl: m.coverDataUrl,
-            lrc: m.lrc,
+            coverDataUrl: m.coverDataUrl ?? prev?.coverDataUrl,
+            lrc: m.lrc ?? prev?.lrc,
             addedBy: p.identity,
             addedByName: p.name || p.identity,
           };
@@ -670,9 +695,17 @@ class RoomController {
           musicQueue: s.musicQueue.map((t) => (t.id === m.trackId ? { ...t, lrc: m.lrc } : t)),
         }));
         break;
+      case 'music-need':
+        if (this.p2pAudio.hasHostFile(m.trackId)) {
+          void this.p2pAudio.sendTrackByIdToPeer(p.identity, m.trackId);
+        }
+        break;
       case 'music-p2p-offer':
       case 'music-p2p-answer':
       case 'music-p2p-ice':
+      case 'music-relay-start':
+      case 'music-relay-chunk':
+      case 'music-relay-eof':
         if (m.to === this.room?.localParticipant.identity) {
           void this.p2pAudio.handleSignal(p.identity, m);
         }
@@ -1590,6 +1623,53 @@ class RoomController {
 
   /* ------------------------------ music lounge ------------------------------ */
 
+  /** Keep LiveKit publishData packets comfortably under SFU (~15 KB) packet size caps. */
+  private sendCompactMusicQueue(tracks: MusicTrackItem[], activeId: string | null, to?: string[]) {
+    const compact: MusicTrackItem[] = tracks.map((t) => ({
+      ...t,
+      lrc: undefined,
+      coverDataUrl: tracks.length <= 1 && (t.coverDataUrl?.length ?? 0) <= 10500 ? t.coverDataUrl : undefined,
+    }));
+    void this.send({ t: 'music-queue', tracks: compact, activeId }, to);
+  }
+
+  private sendMusicMeta(track: MusicTrackItem, to?: string[]) {
+    const safeCover = (track.coverDataUrl?.length ?? 0) <= 10500 ? track.coverDataUrl : undefined;
+    const safeLrc = track.lrc && track.lrc.length <= 3500 ? track.lrc : undefined;
+    void this.send(
+      {
+        t: 'music-meta',
+        trackId: track.id,
+        title: track.title,
+        artist: track.artist,
+        source: track.source,
+        ytId: track.ytId,
+        fileName: track.fileName,
+        fileSize: track.fileSize,
+        duration: track.duration,
+        coverDataUrl: safeCover,
+        lrc: safeLrc,
+      },
+      to,
+    );
+    if (track.lrc && track.lrc.length > 3500 && track.lrc.length <= 12000) {
+      void this.send({ t: 'music-lrc', trackId: track.id, lrc: track.lrc }, to);
+    }
+  }
+
+  requestMusicTrack(trackId: string) {
+    if (this.p2pAudio.hasHostFile(trackId)) return;
+    const cached = this.p2pAudio.getCachedGuestUrl(trackId);
+    if (cached) {
+      useRoom.setState((s) => ({
+        musicLocalUrls: { ...s.musicLocalUrls, [trackId]: cached },
+        musicProgress: { ...s.musicProgress, [trackId]: 100 },
+      }));
+      return;
+    }
+    void this.send({ t: 'music-need', trackId });
+  }
+
   async addLocalMusicFiles(files: File[]) {
     const s = useRoom.getState();
     const audioFiles = files.filter(isAudioDropCandidate);
@@ -1621,7 +1701,7 @@ class RoomController {
     const nextQueue = [...useRoom.getState().musicQueue, ...added];
     const shouldAutoPlay = !useRoom.getState().musicActiveId && added.length > 0;
     useRoom.setState({ musicQueue: nextQueue });
-    void this.send({ t: 'music-queue', tracks: nextQueue, activeId: useRoom.getState().musicActiveId });
+    this.sendCompactMusicQueue(nextQueue, useRoom.getState().musicActiveId);
     this.setMode('music');
     if (shouldAutoPlay && added[0]) {
       await this.playMusicTrack(added[0].id);
@@ -1652,7 +1732,7 @@ class RoomController {
     const nextQueue = [...s.musicQueue, item];
     const shouldAutoPlay = !s.musicActiveId;
     useRoom.setState({ musicQueue: nextQueue });
-    void this.send({ t: 'music-queue', tracks: nextQueue, activeId: s.musicActiveId });
+    this.sendCompactMusicQueue(nextQueue, s.musicActiveId);
     this.setMode('music');
     if (shouldAutoPlay) {
       await this.playMusicTrack(item.id);
@@ -1666,20 +1746,8 @@ class RoomController {
     if (!track) return;
     useRoom.setState({ musicActiveId: trackId });
     this.setMode('music');
-    void this.send({ t: 'music-queue', tracks: s.musicQueue, activeId: trackId });
-    void this.send({
-      t: 'music-meta',
-      trackId: track.id,
-      title: track.title,
-      artist: track.artist,
-      source: track.source,
-      ytId: track.ytId,
-      fileName: track.fileName,
-      fileSize: track.fileSize,
-      duration: track.duration,
-      coverDataUrl: track.coverDataUrl,
-      lrc: track.lrc,
-    });
+    this.sendCompactMusicQueue(s.musicQueue, trackId);
+    this.sendMusicMeta(track);
     if (track.source === 'local' && this.p2pAudio.hasHostFile(trackId)) {
       void this.p2pAudio.broadcastTrack(trackId);
     }
@@ -1699,7 +1767,7 @@ class RoomController {
     const nextQueue = s.musicQueue.filter((t) => t.id !== trackId);
     const nextActive = s.musicActiveId === trackId ? nextQueue[0]?.id ?? null : s.musicActiveId;
     useRoom.setState({ musicQueue: nextQueue, musicActiveId: nextActive });
-    void this.send({ t: 'music-queue', tracks: nextQueue, activeId: nextActive });
+    this.sendCompactMusicQueue(nextQueue, nextActive);
     if (s.musicActiveId === trackId && nextActive) {
       void this.playMusicTrack(nextActive);
     }

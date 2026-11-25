@@ -6,8 +6,10 @@ const ICE_SERVERS: RTCIceServer[] = [
 ];
 
 const CHUNK_SIZE = 32 * 1024;
+const RELAY_CHUNK_BYTES = 9 * 1024; // ~12 KB base64 JSON — safely under LiveKit publishData 15 KB limit
 const DC_HIGH_WATER = 4 * 1024 * 1024;
 const DC_LOW_WATER = 512 * 1024;
+const P2P_AUDIO_TIMEOUT_MS = 3500;
 
 export interface P2PAudioCallbacks {
   send: (msg: DataMessage, to?: string) => void;
@@ -22,20 +24,43 @@ interface OutboundPeer {
   dc: RTCDataChannel | null;
   pendingIce: RTCIceCandidateInit[];
   sendingTrackId: string | null;
+  connectTimer: number | null;
+  fellBackToRelay: boolean;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  const step = 0x2000;
+  for (let i = 0; i < bytes.length; i += step) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + step));
+  }
+  return btoa(bin);
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(b64);
+  const out = new Uint8Array(new ArrayBuffer(bin.length));
+  for (let i = 0; i < bin.length; i++) {
+    out[i] = bin.charCodeAt(i);
+  }
+  return out;
 }
 
 /**
  * Streams lossless/Hi-Fi audio files (.mp3, .flac, .wav, .m4a, .ogg) peer-to-peer over
- * ordered WebRTC DataChannels so every listener buffers bit-exact audio in seconds.
+ * ordered WebRTC DataChannels, with automatic LiveKit SFU reliable chunk-relay fallback
+ * when NAT/carrier firewalls block direct ICE.
  */
 export class P2PAudioManager {
   private cb: P2PAudioCallbacks;
   private hostFiles = new Map<string, { file: File; mime: string }>();
   private activeHostTrackId: string | null = null;
   private hostPeers = new Map<string, OutboundPeer>();
+  private hostPeerRelayGen = new Map<string, number>();
+  private activeRelays = new Map<string, string>();
   private hostSendGen = 0;
 
-  // Guest state
+  // Guest state (shared by P2P & LiveKit SFU fallback relay)
   private guestPc: RTCPeerConnection | null = null;
   private guestDc: RTCDataChannel | null = null;
   private guestHostId: string | null = null;
@@ -46,6 +71,7 @@ export class P2PAudioManager {
   private guestMime = 'audio/mpeg';
   private guestChunks: Uint8Array<ArrayBuffer>[] = [];
   private guestBlobUrls = new Map<string, string>();
+  private guestReceivingMode: 'p2p' | 'relay' | null = null;
 
   constructor(callbacks: P2PAudioCallbacks) {
     this.cb = callbacks;
@@ -71,16 +97,23 @@ export class P2PAudioManager {
     this.activeHostTrackId = trackId;
     this.hostSendGen++;
 
-    for (const peerId of this.cb.getGuestIds()) {
-      await this.sendTrackToPeer(peerId, trackId, entry.file, entry.mime);
-    }
+    const guests = this.cb.getGuestIds();
+    await Promise.all(guests.map((peerId) => this.sendTrackToPeer(peerId, trackId, entry.file, entry.mime)));
   }
 
   async sendActiveToNewPeer(peerId: string): Promise<void> {
     if (!this.activeHostTrackId) return;
-    const entry = this.hostFiles.get(this.activeHostTrackId);
+    await this.sendTrackByIdToPeer(peerId, this.activeHostTrackId);
+  }
+
+  async sendTrackByIdToPeer(peerId: string, trackId: string): Promise<void> {
+    const entry = this.hostFiles.get(trackId);
     if (!entry) return;
-    await this.sendTrackToPeer(peerId, this.activeHostTrackId, entry.file, entry.mime);
+    // Avoid resetting an active P2P or SFU relay transfer for the exact same peer & track
+    const existing = this.hostPeers.get(peerId);
+    if (existing && existing.sendingTrackId === trackId) return;
+    if (this.activeRelays.get(peerId) === trackId) return;
+    await this.sendTrackToPeer(peerId, trackId, entry.file, entry.mime);
   }
 
   private async sendTrackToPeer(peerId: string, trackId: string, file: File, mime: string): Promise<void> {
@@ -92,6 +125,8 @@ export class P2PAudioManager {
       dc: null,
       pendingIce: [],
       sendingTrackId: trackId,
+      connectTimer: null,
+      fellBackToRelay: false,
     };
     this.hostPeers.set(peerId, peer);
 
@@ -101,24 +136,50 @@ export class P2PAudioManager {
     peer.dc = dc;
 
     const gen = this.hostSendGen;
-    dc.onopen = () => {
-      void this.pumpFile(peer, trackId, file, gen);
+
+    const fallbackToSfuRelay = () => {
+      if (peer.fellBackToRelay || this.hostPeers.get(peerId) !== peer || gen !== this.hostSendGen) return;
+      peer.fellBackToRelay = true;
+      if (peer.connectTimer !== null) {
+        window.clearTimeout(peer.connectTimer);
+        peer.connectTimer = null;
+      }
+      this.closeHostPeer(peerId);
+      void this.relayTrackViaSfu(peerId, trackId, file, mime, gen);
     };
+
+    peer.connectTimer = window.setTimeout(() => {
+      peer.connectTimer = null;
+      if (dc.readyState !== 'open') {
+        fallbackToSfuRelay();
+      }
+    }, P2P_AUDIO_TIMEOUT_MS);
+
+    dc.onopen = () => {
+      if (peer.connectTimer !== null) {
+        window.clearTimeout(peer.connectTimer);
+        peer.connectTimer = null;
+      }
+      if (!peer.fellBackToRelay) {
+        void this.pumpFile(peer, trackId, file, gen);
+      }
+    };
+    dc.onerror = () => fallbackToSfuRelay();
     pc.onicecandidate = (ev) => {
-      if (ev.candidate) {
+      if (ev.candidate && !peer.fellBackToRelay) {
         this.cb.send({ t: 'music-p2p-ice', to: peerId, candidate: ev.candidate.toJSON() }, peerId);
       }
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        this.closeHostPeer(peerId);
+      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        fallbackToSfuRelay();
       }
     };
 
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      if (!offer.sdp || this.hostPeers.get(peerId) !== peer) return;
+      if (!offer.sdp || this.hostPeers.get(peerId) !== peer || peer.fellBackToRelay) return;
       this.cb.send(
         {
           t: 'music-p2p-offer',
@@ -132,7 +193,7 @@ export class P2PAudioManager {
         peerId,
       );
     } catch {
-      this.closeHostPeer(peerId);
+      fallbackToSfuRelay();
     }
   }
 
@@ -141,7 +202,7 @@ export class P2PAudioManager {
     if (!dc || dc.readyState !== 'open') return;
     let offset = 0;
 
-    while (offset < file.size && gen === this.hostSendGen && dc.readyState === 'open') {
+    while (offset < file.size && gen === this.hostSendGen && dc.readyState === 'open' && !peer.fellBackToRelay) {
       if (dc.bufferedAmount > DC_HIGH_WATER) {
         await new Promise<void>((resolve) => {
           const onLow = () => {
@@ -156,7 +217,7 @@ export class P2PAudioManager {
 
       const end = Math.min(offset + CHUNK_SIZE, file.size);
       const buf = await file.slice(offset, end).arrayBuffer();
-      if (gen !== this.hostSendGen || dc.readyState !== 'open') return;
+      if (gen !== this.hostSendGen || dc.readyState !== 'open' || peer.fellBackToRelay) return;
       try {
         dc.send(buf);
       } catch {
@@ -165,10 +226,77 @@ export class P2PAudioManager {
       offset = end;
     }
 
-    if (gen === this.hostSendGen && dc.readyState === 'open' && peer.sendingTrackId === trackId) {
+    if (gen === this.hostSendGen && dc.readyState === 'open' && peer.sendingTrackId === trackId && !peer.fellBackToRelay) {
       try {
         dc.send(JSON.stringify({ kind: 'eof', trackId }));
       } catch {}
+    }
+  }
+
+  /**
+   * Automatic LiveKit SFU reliable chunk-relay fallback when direct WebRTC P2P is blocked by NAT/firewalls.
+   */
+  private async relayTrackViaSfu(
+    peerId: string,
+    trackId: string,
+    file: File,
+    mime: string,
+    gen: number,
+  ): Promise<void> {
+    const relayToken = (this.hostPeerRelayGen.get(peerId) ?? 0) + 1;
+    this.hostPeerRelayGen.set(peerId, relayToken);
+    this.activeRelays.set(peerId, trackId);
+
+    try {
+      this.cb.send(
+        {
+          t: 'music-relay-start',
+          to: peerId,
+          trackId,
+          fileName: file.name,
+          fileSize: file.size,
+          mime,
+        },
+        peerId,
+      );
+
+      let offset = 0;
+      let seq = 0;
+      while (
+        offset < file.size &&
+        gen === this.hostSendGen &&
+        this.hostPeerRelayGen.get(peerId) === relayToken
+      ) {
+        const end = Math.min(offset + RELAY_CHUNK_BYTES, file.size);
+        const ab = await file.slice(offset, end).arrayBuffer();
+        if (gen !== this.hostSendGen || this.hostPeerRelayGen.get(peerId) !== relayToken) return;
+
+        this.cb.send(
+          {
+            t: 'music-relay-chunk',
+            to: peerId,
+            trackId,
+            seq,
+            data: bytesToBase64(new Uint8Array(ab)),
+          },
+          peerId,
+        );
+
+        offset = end;
+        seq++;
+        // Pace gently every 4 packets (~36 KB) so LiveKit SFU voice & chat remain silky-smooth
+        if (seq % 4 === 0) {
+          await new Promise((r) => window.setTimeout(r, 14));
+        }
+      }
+
+      if (gen === this.hostSendGen && this.hostPeerRelayGen.get(peerId) === relayToken) {
+        this.cb.send({ t: 'music-relay-eof', to: peerId, trackId }, peerId);
+      }
+    } finally {
+      if (this.hostPeerRelayGen.get(peerId) === relayToken) {
+        this.activeRelays.delete(peerId);
+      }
     }
   }
 
@@ -203,6 +331,43 @@ export class P2PAudioManager {
         }
         break;
       }
+      case 'music-relay-start': {
+        if (this.guestBlobUrls.has(msg.trackId)) {
+          this.cb.onGuestAudioReady(msg.trackId, this.guestBlobUrls.get(msg.trackId)!);
+          return;
+        }
+        // Ignore stale P2P channel once host switches this track to reliable SFU relay
+        this.resetGuestReceiver();
+        this.guestReceivingMode = 'relay';
+        this.guestHostId = fromId;
+        this.guestTrackId = msg.trackId;
+        this.guestExpectedSize = Math.max(1, msg.fileSize);
+        this.guestReceivedSize = 0;
+        this.guestMime = msg.mime;
+        this.guestChunks = [];
+        this.cb.onGuestProgress(msg.trackId, 1);
+        break;
+      }
+      case 'music-relay-chunk': {
+        if (this.guestReceivingMode !== 'relay' || this.guestTrackId !== msg.trackId) return;
+        const bytes = base64ToBytes(msg.data);
+        this.guestChunks.push(bytes);
+        this.guestReceivedSize += bytes.byteLength;
+        this.cb.onGuestProgress(
+          msg.trackId,
+          Math.min(99, Math.round((this.guestReceivedSize / this.guestExpectedSize) * 100)),
+        );
+        if (this.guestReceivedSize >= this.guestExpectedSize) {
+          this.finalizeGuestTrack();
+        }
+        break;
+      }
+      case 'music-relay-eof': {
+        if (this.guestReceivingMode === 'relay' && this.guestTrackId === msg.trackId) {
+          this.finalizeGuestTrack();
+        }
+        break;
+      }
     }
   }
 
@@ -214,6 +379,7 @@ export class P2PAudioManager {
     mime: string,
   ): Promise<void> {
     this.resetGuestReceiver();
+    this.guestReceivingMode = 'p2p';
     this.guestHostId = hostId;
     this.guestTrackId = trackId;
     this.guestExpectedSize = Math.max(1, fileSize);
@@ -234,6 +400,7 @@ export class P2PAudioManager {
       dc.binaryType = 'arraybuffer';
       this.guestDc = dc;
       dc.onmessage = (m) => {
+        if (this.guestReceivingMode !== 'p2p' || this.guestTrackId !== trackId) return;
         if (typeof m.data === 'string') {
           try {
             const ctrl = JSON.parse(m.data) as { kind: string; trackId?: string };
@@ -292,11 +459,16 @@ export class P2PAudioManager {
     const peer = this.hostPeers.get(peerId);
     if (!peer) return;
     this.hostPeers.delete(peerId);
+    if (peer.connectTimer !== null) {
+      window.clearTimeout(peer.connectTimer);
+      peer.connectTimer = null;
+    }
     try { peer.dc?.close(); } catch {}
     try { peer.pc.close(); } catch {}
   }
 
   private resetGuestReceiver(): void {
+    this.guestReceivingMode = null;
     try { this.guestDc?.close(); } catch {}
     this.guestDc = null;
     try { this.guestPc?.close(); } catch {}
@@ -310,6 +482,8 @@ export class P2PAudioManager {
     this.hostSendGen++;
     for (const id of [...this.hostPeers.keys()]) this.closeHostPeer(id);
     this.hostPeers.clear();
+    this.hostPeerRelayGen.clear();
+    this.activeRelays.clear();
     this.hostFiles.clear();
     this.activeHostTrackId = null;
     this.resetGuestReceiver();
