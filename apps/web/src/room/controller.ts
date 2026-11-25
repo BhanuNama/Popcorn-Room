@@ -123,6 +123,7 @@ class RoomController {
   private localAnalyserBuf: Uint8Array<ArrayBuffer> | null = null;
   private localMovieTracks: MediaStreamTrack[] = [];
   private localMovieStreamEl: HTMLVideoElement | null = null;
+  private blackVideo: HTMLVideoElement | null = null;
   private stopShareAutopilot: (() => void) | null = null;
   private p2pHostFallbackListeners = new Set<() => void>();
   private p2pGuestStateListeners = new Set<(active: boolean) => void>();
@@ -1528,6 +1529,7 @@ class RoomController {
     canvas.height = 18;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     let darkCount = 0;
+    this.blackVideo = video;
     this.blackTimer = setInterval(() => {
       if (!ctx || video.readyState < 2) return;
       ctx.drawImage(video, 0, 0, 32, 18);
@@ -1538,12 +1540,15 @@ class RoomController {
       const black = darkCount >= 3;
       if (black !== useRoom.getState().warnings.blackFrame) useRoom.getState().setWarnings({ blackFrame: black });
     }, 2000);
-    (this.blackTimer as unknown as { video?: HTMLVideoElement }).video = video;
   }
 
   private stopBlackFrameDetector() {
     if (this.blackTimer) clearInterval(this.blackTimer);
     this.blackTimer = null;
+    if (this.blackVideo) {
+      this.blackVideo.srcObject = null;
+      this.blackVideo = null;
+    }
   }
 
   /* ------------------------------ receiver-side mixing ------------------------------ */
